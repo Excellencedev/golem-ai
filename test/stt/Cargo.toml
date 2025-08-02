@@ -1,0 +1,30 @@
+[package]
+name = "stt-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+
+[dependencies]
+golem-stt = { path = "../../stt/stt", version = "0.0.0", default-features = true, features = ["mock_http"] }
+# Align wit-bindgen with llm (0.40.x)
+wit-bindgen = { version = "0.40.0", features = ["macros"] }
+wit-bindgen-rt = { version = "0.40.0" }
+
+[[test]]
+name = "integration"
+path = "src/integration.rs"
+
+[features]
+default = []
+mock_http = []
+
+[build-dependencies]
+# Pin build-time macros to 0.40.x to match llm
+wit-bindgen = { version = "0.40.0" }
+wit-bindgen-rt = { version = "0.40.0" }
+wit-bindgen-rust-macro = { version = "0.40.0" }
