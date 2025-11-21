@@ -1,0 +1,184 @@
+# yaml-language-server: $schema=https://json.schemastore.org/cargo-make
+[config]
+default_to_workspace = false
+skip_core_tasks = true
+
+[tasks.build]
+run_task = { name = [
+    "build-elevenlabs",
+    "build-polly",
+    "build-google",
+    "build-deepgram",
+] }
+
+[tasks.build-portable]
+run_task = { name = [
+    "build-elevenlabs-portable",
+    "build-polly-portable",
+    "build-google-portable",
+    "build-deepgram-portable",
+] }
+
+[tasks.release-build]
+run_task = { name = [
+    "release-build-elevenlabs",
+    "release-build-polly",
+    "release-build-google",
+    "release-build-deepgram",
+] }
+
+[tasks.release-build-portable]
+run_task = { name = [
+    "release-build-elevenlabs-portable",
+    "release-build-polly-portable",
+    "release-build-google-portable",
+    "release-build-deepgram-portable",
+] }
+
+[tasks.build-elevenlabs]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-elevenlabs"]
+
+[tasks.build-elevenlabs-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-elevenlabs", "--no-default-features"]
+
+[tasks.build-polly]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-polly"]
+
+[tasks.build-polly-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-polly", "--no-default-features"]
+
+[tasks.build-google]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-google"]
+
+[tasks.build-google-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-google", "--no-default-features"]
+
+[tasks.build-deepgram]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-deepgram"]
+
+[tasks.build-deepgram-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-deepgram", "--no-default-features"]
+
+[tasks.release-build-elevenlabs]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-elevenlabs", "--release"]
+
+[tasks.release-build-elevenlabs-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-elevenlabs", "--release", "--no-default-features"]
+
+[tasks.release-build-polly]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-polly", "--release"]
+
+[tasks.release-build-polly-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-polly", "--release", "--no-default-features"]
+
+[tasks.release-build-google]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-google", "--release"]
+
+[tasks.release-build-google-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-google", "--release", "--no-default-features"]
+
+[tasks.release-build-deepgram]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = ["build", "-p", "golem-tts-deepgram", "--release"]
+
+[tasks.release-build-deepgram-portable]
+install_crate = { crate_name = "cargo-component", version = "0.21.1" }
+command = "cargo-component"
+args = [
+    "build",
+    "-p",
+    "golem-tts-deepgram",
+    "--release",
+    "--no-default-features",
+]
+
+[tasks.wit-update]
+install_crate = { crate_name = "wit-deps-cli" }
+command = "wit-deps"
+args = ["update"]
+
+[tasks.wit]
+dependencies = ["wit-update"]
+
+script_runner = "@duckscript"
+script = """
+modules = array elevenlabs polly google deepgram
+
+for module in ${modules}
+    rm -r ${module}/wit/deps
+    mkdir ${module}/wit/deps/golem-tts
+    cp wit/golem-tts.wit ${module}/wit/deps/golem-tts/golem-tts.wit
+    cp wit/deps/wasiio ${module}/wit/deps
+
+    echo "Copied WIT for module tts::${module}"
+end
+
+# Copy WIT files for integration tests
+rm -r ../test/tts/wit/deps/golem-tts
+mkdir ../test/tts/wit/deps/golem-tts
+mkdir ../test/tts/wit/deps/io
+cp wit/golem-tts.wit ../test/tts/wit/deps/golem-tts/golem-tts.wit
+cp wit/deps/wasiio/error.wit ../test/tts/wit/deps/io/error.wit
+cp wit/deps/wasiio/poll.wit ../test/tts/wit/deps/io/poll.wit
+cp wit/deps/wasiio/streams.wit ../test/tts/wit/deps/io/streams.wit
+cp wit/deps/wasiio/world.wit ../test/tts/wit/deps/io/world.wit
+
+echo "Copied WIT for module test"
+"""
+
+[tasks.build-test-components]
+dependencies = ["build"]
+description = "Builds tts test components with golem-cli"
+script = '''
+cd ../test/tts
+
+golem-cli --version
+golem-cli --dev-mode app clean
+golem-cli --dev-mode app build -b elevenlabs-debug
+golem-cli --dev-mode app build -b polly-debug
+golem-cli --dev-mode app build -b google-debug
+golem-cli --dev-mode app build -b deepgram-debug
+'''
+
+[tasks.release-build-test-components]
+dependencies = ["release-build"]
+description = "Builds tts test components with golem-cli"
+script = '''
+cd ../test/tts
+
+golem-cli --version
+golem-cli --dev-mode app clean
+golem-cli --dev-mode app build -b elevenlabs-release
+golem-cli --dev-mode app build -b polly-release
+golem-cli --dev-mode app build -b google-release
+golem-cli --dev-mode app build -b deepgram-release
+'''
