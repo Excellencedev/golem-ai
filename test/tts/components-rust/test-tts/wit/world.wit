@@ -1,0 +1,17 @@
+package test:tts;
+
+world test-tts {
+    import golem:tts/voices@1.0.0;
+    import golem:tts/synthesis@1.0.0;
+    import golem:tts/streaming@1.0.0;
+    import golem:tts/advanced@1.0.0;
+    
+    export test1: func() -> string;
+    export test2: func() -> string;
+    export test3: func() -> string;
+    export test4: func() -> string;
+    export test5: func() -> string;
+    export test-error-handling: func() -> string;
+    export test-voice-search: func() -> string;
+    export test-batch-synthesis: func() -> string;
+}

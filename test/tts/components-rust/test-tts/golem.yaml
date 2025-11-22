@@ -1,0 +1,60 @@
+profiles:
+  # ElevenLabs test profiles
+  debug-elevenlabs:
+    wasmComponent: target/wasm32-wasip2/debug/test_tts.wasm
+    componentName: test:tts/debug
+    dependencies:
+      tts-elevenlabs:
+        export: golem:tts
+
+  release-elevenlabs:
+    wasmComponent: target/wasm32-wasip2/release/test_tts.wasm
+    componentName: test:tts/release
+    dependencies:
+      tts-elevenlabs:
+        export: golem:tts
+
+  # AWS Polly test profiles
+  debug-polly:
+    wasmComponent: target/wasm32-wasip2/debug/test_tts.wasm
+    componentName: test:tts/debug
+    dependencies:
+      tts-polly:
+        export: golem:tts
+
+  release-polly:
+    wasmComponent: target/wasm32-wasip2/release/test_tts.wasm
+    componentName: test:tts/release
+    dependencies:
+      tts-polly:
+        export: golem:tts
+
+  # Google Cloud TTS test profiles
+  debug-google:
+    wasmComponent: target/wasm32-wasip2/debug/test_tts.wasm
+    componentName: test:tts/debug
+    dependencies:
+      tts-google:
+        export: golem:tts
+
+  release-google:
+    wasmComponent: target/wasm32-wasip2/release/test_tts.wasm
+    componentName: test:tts/release
+    dependencies:
+      tts-google:
+        export: golem:tts
+
+  # Deepgram Aura test profiles
+  debug-deepgram:
+    wasmComponent: target/wasm32-wasip2/debug/test_tts.wasm
+    componentName: test:tts/debug
+    dependencies:
+      tts-deepgram:
+        export: golem:tts
+
+  release-deepgram:
+    wasmComponent: target/wasm32-wasip2/release/test_tts.wasm
+    componentName: test:tts/release
+    dependencies:
+      tts-deepgram:
+        export: golem:tts

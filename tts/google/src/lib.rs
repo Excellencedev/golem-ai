@@ -1,169 +1,199 @@
-// Simplified Google Cloud TTS implementation (stub)
+mod client;
+mod conversions;
+
+use client::GoogleCloudTtsClient;
 use golem_tts::{
+    config::with_config_key,
     durability::{DurableTts, ExtendedGuest},
     guest::{TtsAdvancedGuest, TtsSynthesisGuest, TtsStreamingGuest, TtsVoicesGuest},
 };
-use golem_tts::golem::tts::types::*;
-use golem_tts::exports::golem::tts::voices::*;
-use golem_tts::exports::golem::tts::synthesis::*;
-use golem_tts::exports::golem::tts::streaming::*;
-use golem_tts::exports::golem::tts::advanced::*;
+use golem_tts::golem::tts::types::{
+    TextInput as WitTextInput, TimingInfo as WitTimingInfo, SynthesisResult as WitSynthesisResult,
+    AudioChunk as WitAudioChunk, TtsError as WitTtsError,
+};
+use golem_tts::exports::golem::tts::voices::{
+    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
+};
+use golem_tts::exports::golem::tts::synthesis::{
+    SynthesisOptions as WitSynthesisOptions, ValidationResult as WitValidationResult,
+};
+use golem_tts::exports::golem::tts::streaming::{
+    StreamSession as WitStreamSession, StreamStatus as WitStreamStatus,
+};
+use golem_tts::exports::golem::tts::advanced::{
+    AudioSample as WitAudioSample, VoiceDesignParams as WitVoiceDesignParams,
+    PronunciationEntry as WitPronunciationEntry, LongFormJob as WitLongFormJob,
+    LongFormResult as WitLongFormResult,
+};
 
 struct GoogleComponent;
 
+impl GoogleComponent {
+    const ENV_VAR_NAME: &'static str = "GOOGLE_APPLICATION_CREDENTIALS";
+}
+
 impl TtsVoicesGuest for GoogleComponent {
-    fn list_voices(_filter: Option<VoiceFilter>) -> Result<Vec<VoiceInfo>, TtsError> {
-        Ok(vec![
-            VoiceInfo {
-                id: "en-US-Neural2-A".to_string(),
-                name: "en-US-Neural2-A".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("Google Neural2 voice".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-        ])
+    fn list_voices(filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
+            let client = GoogleCloudTtsClient::new(credentials_path)?;
+            let all_voices = client.list_voices()?;
+            
+            if let Some(f) = filter {
+                Ok(all_voices.into_iter().filter(|v| {
+                    if let Some(ref lang) = f.language {
+                        if !v.language.starts_with(lang) {
+                            return false;
+                        }
+                    }
+                    if let Some(gender) = f.gender {
+                        if v.gender != gender {
+                            return false;
+                        }
+                    }
+                    true
+                }).collect())
+            } else {
+                Ok(all_voices)
+            }
+        })
     }
 
-    fn get_voice(voice_id: String) -> Result<VoiceInfo, TtsError> {
-        let voices = Self::list_voices(None)?;
-        voices.into_iter().find(|v| v.id == voice_id).ok_or_else(|| TtsError::VoiceNotFound(voice_id))
+    fn get_voice(voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
+        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
+            let client = GoogleCloudTtsClient::new(credentials_path)?;
+            client.get_voice(voice_id)
+        })
     }
 
-    fn search_voices(query: String, filter: Option<VoiceFilter>) -> Result<Vec<VoiceInfo>, TtsError> {
-        let all_voices = Self::list_voices(filter)?;
-        let query_lower = query.to_lowercase();
-        Ok(all_voices.into_iter().filter(|v| v.name.to_lowercase().contains(&query_lower)).collect())
+    fn search_voices(query: String, filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
+            let client = GoogleCloudTtsClient::new(credentials_path)?;
+            client.search_voices(query, filter)
+        })
     }
 
-    fn list_languages() -> Result<Vec<LanguageInfo>, TtsError> {
-        Ok(vec![
-            LanguageInfo {
-                code: "en-US".to_string(),
-                name: "English (US)".to_string(),
-                native_name: "English (US)".to_string(),
-                voice_count: 5,
-            },
-        ])
+    fn list_languages() -> Result<Vec<WitLanguageInfo>, WitTtsError> {
+        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
+            let client = GoogleCloudTtsClient::new(credentials_path)?;
+            client.list_languages()
+        })
     }
 }
 
 impl TtsSynthesisGuest for GoogleComponent {
-    fn synthesize(input: TextInput, _options: SynthesisOptions) -> Result<SynthesisResult, TtsError> {
-        let char_count = input.content.len() as u32;
-        Ok(SynthesisResult {
-            audio_data: vec![],
-            metadata: SynthesisMetadata{
-                duration_seconds: char_count as f32 * 0.05,
-                character_count: char_count,
-                word_count: input.content.split_whitespace().count() as u32,
-                audio_size_bytes: 0,
-                request_id: uuid::Uuid::new_v4().to_string(),
-                provider_info: Some("Google Cloud TTS (stub)".to_string()),
-            },
+    fn synthesize(input: WitTextInput, options: WitSynthesisOptions) -> Result<WitSynthesisResult, WitTtsError> {
+        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
+            let client = GoogleCloudTtsClient::new(credentials_path)?;
+            client.synthesize(input, options)
         })
     }
 
-    fn synthesize_batch(inputs: Vec<TextInput>, options: SynthesisOptions) -> Result<Vec<SynthesisResult>, TtsError> {
-        inputs.into_iter().map(|input| Self::synthesize(input, options.clone())).collect()
+    fn synthesize_batch(inputs: Vec<WitTextInput>, options: WitSynthesisOptions) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
+        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
+            let client = GoogleCloudTtsClient::new(credentials_path)?;
+            client.synthesize_batch(inputs, options)
+        })
     }
 
-    fn get_timing_marks(_input: TextInput, _voice_id: String) -> Result<Vec<TimingInfo>, TtsError> {
-        Ok(vec![])
+    fn get_timing_marks(_input: WitTextInput, _voice_id: String) -> Result<Vec<WitTimingInfo>, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Google Cloud TTS timing marks available via timepoints in synthesis, not as separate call".to_string()))
     }
 
-    fn validate_input(input: TextInput, _voice_id: String) -> Result<ValidationResult, TtsError> {
+    fn validate_input(input: WitTextInput, _voice_id: String) -> Result<WitValidationResult, WitTtsError> {
         let char_count = input.content.len() as u32;
-        Ok(ValidationResult {
-            is_valid: char_count > 0 && char_count <= 5000,
+        let is_valid = char_count > 0 && char_count <= 5000;
+        
+        Ok(WitValidationResult {
+            is_valid,
             character_count: char_count,
             estimated_duration: Some(char_count as f32 * 0.05),
-            warnings: vec![],
-            errors: vec![],
+            warnings: if char_count > 4000 {
+                vec!["Text is quite long, consider splitting for better performance".to_string()]
+            } else {
+                vec![]
+            },
+            errors: if !is_valid {
+                vec!["Text must be between 1 and 5000 characters".to_string()]
+            } else {
+                vec![]
+            },
         })
     }
 }
 
 impl TtsStreamingGuest for GoogleComponent {
-    fn create_stream(_options: SynthesisOptions) -> Result<StreamSession, TtsError> {
-        Err(TtsError::UnsupportedOperation("Google Cloud TTS streaming not yet implemented".to_string()))
+    fn create_stream(_options: WitSynthesisOptions) -> Result<WitStreamSession, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Google Cloud TTS streaming not yet implemented".to_string()))
     }
 
-    fn stream_send_text(_session_id: String, _input: TextInput) -> Result<(), TtsError> {
-        Err(TtsError::UnsupportedOperation("Streaming not supported".to_string()))
+    fn stream_send_text(_session_id: String, _input: WitTextInput) -> Result<(), WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Streaming not yet implemented".to_string()))
     }
 
-    fn stream_finish(_session_id: String) -> Result<(), TtsError> {
-        Err(TtsError::UnsupportedOperation("Streaming not supported".to_string()))
+    fn stream_finish(_session_id: String) -> Result<(), WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Streaming not yet implemented".to_string()))
     }
 
-    fn stream_receive_chunk(_session_id: String) -> Result<Option<AudioChunk>, TtsError> {
-        Err(TtsError::UnsupportedOperation("Streaming not supported".to_string()))
+    fn stream_receive_chunk(_session_id: String) -> Result<Option<WitAudioChunk>, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Streaming not yet implemented".to_string()))
     }
 
-    fn stream_has_pending(_session_id: String) -> Result<bool, TtsError> {
-        Err(TtsError::UnsupportedOperation("Streaming not supported".to_string()))
+    fn stream_has_pending(_session_id: String) -> Result<bool, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Streaming not yet implemented".to_string()))
     }
 
-    fn stream_get_status(_session_id: String) -> Result<StreamStatus, TtsError> {
-        Err(TtsError::UnsupportedOperation("Streaming not supported".to_string()))
+    fn stream_get_status(_session_id: String) -> Result<WitStreamStatus, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Streaming not yet implemented".to_string()))
     }
 
-    fn stream_close(_session_id: String) -> Result<(), TtsError> {
-        Err(TtsError::UnsupportedOperation("Streaming not supported".to_string()))
+    fn stream_close(_session_id: String) -> Result<(), WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Streaming not yet implemented".to_string()))
     }
 }
 
 impl TtsAdvancedGuest for GoogleComponent {
-    fn create_voice_clone(_name: String, _audio_samples: Vec<AudioSample>, _description: Option<String>) -> Result<String, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn create_voice_clone(_name: String, _audio_samples: Vec<WitAudioSample>, _description: Option<String>) -> Result<String, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Google Cloud TTS does not support voice cloning via API".to_string()))
     }
 
-    fn design_voice(_name: String, _characteristics: VoiceDesignParams) -> Result<String, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn design_voice(_name: String, _characteristics: WitVoiceDesignParams) -> Result<String, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Google Cloud TTS does not support voice design via API".to_string()))
     }
 
-    fn convert_voice(_input_audio: Vec<u8>, _target_voice_id: String, _preserve_timing: Option<bool>) -> Result<Vec<u8>, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn convert_voice(_input_audio: Vec<u8>, _target_voice_id: String, _preserve_timing: Option<bool>) -> Result<Vec<u8>, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Google Cloud TTS does not support voice conversion".to_string()))
     }
 
-    fn generate_sound_effect(_description: String, _duration_seconds: Option<f32>, _style_influence: Option<f32>) -> Result<Vec<u8>, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn generate_sound_effect(_description: String, _duration_seconds: Option<f32>, _style_influence: Option<f32>) -> Result<Vec<u8>, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Google Cloud TTS does not support sound effect generation".to_string()))
     }
 
-    fn create_lexicon(_name: String, _language: String, _entries: Option<Vec<PronunciationEntry>>) -> Result<String, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn create_lexicon(_name: String, _language: String, _entries: Option<Vec<WitPronunciationEntry>>) -> Result<String, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Lexicon support not yet implemented".to_string()))
     }
 
-    fn add_lexicon_entry(_lexicon_id: String, _entry: PronunciationEntry) -> Result<(), TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn add_lexicon_entry(_lexicon_id: String, _entry: WitPronunciationEntry) -> Result<(), WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Lexicon support not yet implemented".to_string()))
     }
 
-    fn remove_lexicon_entry(_lexicon_id: String, _word: String) -> Result<(), TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn remove_lexicon_entry(_lexicon_id: String, _word: String) -> Result<(), WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Lexicon support not yet implemented".to_string()))
     }
 
-    fn export_lexicon(_lexicon_id: String) -> Result<String, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn export_lexicon(_lexicon_id: String) -> Result<String, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Lexicon support not yet implemented".to_string()))
     }
 
-    fn synthesize_long_form(_content: String, _voice_id: String, _output_location: String, _chapter_breaks: Option<Vec<u32>>) -> Result<LongFormJob, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn synthesize_long_form(_content: String, _voice_id: String, _output_location: String, _chapter_breaks: Option<Vec<u32>>) -> Result<WitLongFormJob, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Long-form synthesis not yet implemented".to_string()))
     }
 
-    fn get_long_form_status(_job_id: String) -> Result<LongFormResult, TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn get_long_form_status(_job_id: String) -> Result<WitLongFormResult, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Long-form synthesis not yet implemented".to_string()))
     }
 
-    fn cancel_long_form(_job_id: String) -> Result<(), TtsError> {
-        Err(TtsError::UnsupportedOperation("Not supported".to_string()))
+    fn cancel_long_form(_job_id: String) -> Result<(), WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation("Long-form synthesis not yet implemented".to_string()))
     }
 }
 

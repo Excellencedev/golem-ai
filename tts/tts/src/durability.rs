@@ -100,7 +100,7 @@ mod passthrough_impl {
 
         fn stream_close(session_id: String) -> Result<(), WitTtsError> {
             LOGGING_STATE.with_borrow_mut(|state| state.init());
-            Impl:stream_close(session_id)
+            Impl::stream_close(session_id)
         }
     }
 

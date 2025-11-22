@@ -1,12 +1,15 @@
+mod client;
+mod conversions;
+
+use client::PollyClient;
 use golem_tts::{
-    config::with_config_key,
+    config::{with_config_key, get_optional_config},
     durability::{DurableTts, ExtendedGuest},
     guest::{TtsAdvancedGuest, TtsSynthesisGuest, TtsStreamingGuest, TtsVoicesGuest},
-    LOGGING_STATE,
 };
 use golem_tts::golem::tts::types::{
     TextInput as WitTextInput, TimingInfo as WitTimingInfo, SynthesisResult as WitSynthesisResult,
-    AudioChunk as WitAudioChunk, TtsError as WitTtsError, SynthesisMetadata, VoiceGender, VoiceQuality,
+    AudioChunk as WitAudioChunk, TtsError as WitTtsError,
 };
 use golem_tts::exports::golem::tts::voices::{
     LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
@@ -17,7 +20,7 @@ use golem_tts::exports::golem::tts::synthesis::{
 use golem_tts::exports::golem::tts::streaming::{
     StreamSession as WitStreamSession, StreamStatus as WitStreamStatus,
 };
-use golem_tts::exports::golem::t ts::advanced::{
+use golem_tts::exports::golem::tts::advanced::{
     AudioSample as WitAudioSample, VoiceDesignParams as WitVoiceDesignParams,
     PronunciationEntry as WitPronunciationEntry, LongFormJob as WitLongFormJob,
     LongFormResult as WitLongFormResult,
@@ -25,132 +28,129 @@ use golem_tts::exports::golem::t ts::advanced::{
 
 struct PollyComponent;
 
+impl PollyComponent {
+    const ACCESS_KEY_ENV: &'static str = "AWS_ACCESS_KEY_ID";
+    const SECRET_KEY_ENV: &'static str = "AWS_SECRET_ACCESS_KEY";
+    const REGION_ENV: &'static str = "AWS_REGION";
+    const SESSION_TOKEN_ENV: &'static str = "AWS_SESSION_TOKEN";
+    
+    fn create_client() -> Result<PollyClient, WitTtsError> {
+        with_config_key(Self::ACCESS_KEY_ENV, Err, |access_key| {
+            with_config_key(Self::SECRET_KEY_ENV, Err, |secret_key| {
+                let region = std::env::var(Self::REGION_ENV)
+                    .unwrap_or_else(|_| "us-east-1".to_string());
+                let session_token = get_optional_config(Self::SESSION_TOKEN_ENV);
+                
+                Ok(PollyClient::new(access_key, secret_key, region, session_token))
+            })
+        })
+    }
+}
+
 impl TtsVoicesGuest for PollyComponent {
-    fn list_voices(_filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        // Stub: Return common Polly voices
-        Ok(vec![
-            WitVoiceInfo {
-                id: "Joanna".to_string(),
-                name: "Joanna".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("US English female voice".to_string()),
-                provider: "AWS Polly".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            WitVoiceInfo {
-                id: "Matthew".to_string(),
-                name: "Matthew".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Male,
-                quality: VoiceQuality::Neural,
-                description: Some("US English male voice".to_string()),
-                provider: "AWS Polly".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-        ])
+    fn list_voices(filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+        let client = Self::create_client()?;
+        let all_voices = client.list_voices()?;
+        
+        if let Some(f) = filter {
+            Ok(all_voices.into_iter().filter(|v| {
+                if let Some(ref lang) = f.language {
+                    if !v.language.starts_with(lang) {
+                        return false;
+                    }
+                }
+                if let Some(gender) = f.gender {
+                    if v.gender != gender {
+                        return false;
+                    }
+                }
+                true
+            }).collect())
+        } else {
+            Ok(all_voices)
+        }
     }
 
     fn get_voice(voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
-        let voices = Self::list_voices(None)?;
-        voices.into_iter()
-            .find(|v| v.id == voice_id)
-            .ok_or_else(|| WitTtsError::VoiceNotFound(voice_id))
+        let client = Self::create_client()?;
+        client.get_voice(voice_id)
     }
 
     fn search_voices(query: String, filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        let all_voices = Self::list_voices(filter)?;
-        let query_lower = query.to_lowercase();
-        Ok(all_voices.into_iter().filter(|v| v.name.to_lowercase().contains(&query_lower)).collect())
+        let client = Self::create_client()?;
+        client.search_voices(query, filter)
     }
 
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitTtsError> {
-        Ok(vec![
-            WitLanguageInfo {
-                code: "en-US".to_string(),
-                name: "English (US)".to_string(),
-                native_name: "English (US)".to_string(),
-                voice_count: 10,
-            },
-        ])
+        let client = Self::create_client()?;
+        client.list_languages()
     }
 }
 
 impl TtsSynthesisGuest for PollyComponent {
     fn synthesize(input: WitTextInput, options: WitSynthesisOptions) -> Result<WitSynthesisResult, WitTtsError> {
-        // Stub implementation
-        let char_count = input.content.len() as u32;
-        Ok(WitSynthesisResult {
-            audio_data: vec![], // Would contain actual MP3 data from Polly
-            metadata: SynthesisMetadata {
-                duration_seconds: char_count as f32 * 0.05,
-                character_count: char_count,
-                word_count: input.content.split_whitespace().count() as u32,
-                audio_size_bytes: 0,
-                request_id: uuid::Uuid::new_v4().to_string(),
-                provider_info: Some("AWS Polly (stub)".to_string()),
-            },
-        })
+        let client = Self::create_client()?;
+        client.synthesize(input, options)
     }
 
     fn synthesize_batch(inputs: Vec<WitTextInput>, options: WitSynthesisOptions) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
-        inputs.into_iter().map(|input| Self::synthesize(input, options.clone())).collect()
+        let client = Self::create_client()?;
+        client.synthesize_batch(inputs, options)
     }
 
     fn get_timing_marks(_input: WitTextInput, _voice_id: String) -> Result<Vec<WitTimingInfo>, WitTtsError> {
-        Ok(vec![])
+        Err(WitTtsError::UnsupportedOperation("Speech marks support not yet implemented".to_string()))
     }
 
     fn validate_input(input: WitTextInput, _voice_id: String) -> Result<WitValidationResult, WitTtsError> {
         let char_count = input.content.len() as u32;
+        let is_valid = char_count > 0 && char_count <= 3000;
+        
         Ok(WitValidationResult {
-            is_valid: char_count > 0 && char_count <= 3000,
+            is_valid,
             character_count: char_count,
             estimated_duration: Some(char_count as f32 * 0.05),
-            warnings: vec![],
-            errors: vec![],
+            warnings: if char_count > 2500 {
+                vec!["Text is approaching Polly's limit, consider splitting".to_string()]
+            } else {
+                vec![]
+            },
+            errors: if !is_valid {
+                vec!["Text must be between 1 and 3000 characters".to_string()]
+            } else {
+                vec![]
+            },
         })
     }
 }
 
 impl TtsStreamingGuest for PollyComponent {
     fn create_stream(_options: WitSynthesisOptions) -> Result<WitStreamSession, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("AWS Polly does not support streaming synthesis".to_string()))
     }
 
     fn stream_send_text(_session_id: String, _input: WitTextInput) -> Result<(), WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("Streaming not supported".to_string()))
     }
 
     fn stream_finish(_session_id: String) -> Result<(), WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("Streaming not supported".to_string()))
     }
 
     fn stream_receive_chunk(_session_id: String) -> Result<Option<WitAudioChunk>, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("Streaming not supported".to_string()))
     }
 
     fn stream_has_pending(_session_id: String) -> Result<bool, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("Streaming not supported".to_string()))
     }
 
     fn stream_get_status(_session_id: String) -> Result<WitStreamStatus, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("Streaming not supported".to_string()))
     }
 
     fn stream_close(_session_id: String) -> Result<(), WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("AWS Polly does not have native streaming support".to_string()))
+        Err(WitTtsError::UnsupportedOperation("Streaming not supported".to_string()))
     }
 }
 
@@ -172,7 +172,6 @@ impl TtsAdvancedGuest for PollyComponent {
     }
 
     fn create_lexicon(_name: String, _language: String, _entries: Option<Vec<WitPronunciationEntry>>) -> Result<String, WitTtsError> {
-        // Polly supports lexicons but marking as stub for now
         Err(WitTtsError::UnsupportedOperation("Lexicon support not yet implemented".to_string()))
     }
 

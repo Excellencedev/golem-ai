@@ -1,0 +1,60 @@
+profiles:
+  # ElevenLabs profiles
+  elevenlabs-debug:
+    wasmComponent: ../../tts/elevenlabs/target/wasm32-wasip2/debug/golem_tts_elevenlabs.wasm
+    componentName: tts-elevenlabs
+    testComponents:
+      - ../common-rust/golem.yaml#debug
+      - components-rust/test-tts/golem.yaml#debug-elevenlabs
+
+  elevenlabs-release:
+    wasmComponent: ../../tts/elevenlabs/target/wasm32-wasip2/release/golem_tts_elevenlabs.wasm
+    componentName: tts-elevenlabs
+    testComponents:
+      - ../common-rust/golem.yaml#release
+      - components-rust/test-tts/golem.yaml#release-elevenlabs
+
+  # AWS Polly profiles
+  polly-debug:
+    wasmComponent: ../../tts/polly/target/wasm32-wasip2/debug/golem_tts_polly.wasm
+    componentName: tts-polly
+    testComponents:
+      - ../common-rust/golem.yaml#debug
+      - components-rust/test-tts/golem.yaml#debug-polly
+
+  polly-release:
+    wasmComponent: ../../tts/polly/target/wasm32-wasip2/release/golem_tts_polly.wasm
+    componentName: tts-polly
+    testComponents:
+      - ../common-rust/golem.yaml#release
+      - components-rust/test-tts/golem.yaml#release-polly
+
+  # Google Cloud TTS profiles
+  google-debug:
+    wasmComponent: ../../tts/google/target/wasm32-wasip2/debug/golem_tts_google.wasm
+    componentName: tts-google
+    testComponents:
+      - ../common-rust/golem.yaml#debug
+      - components-rust/test-tts/golem.yaml#debug-google
+
+  google-release:
+    wasmComponent: ../../tts/google/target/wasm32-wasip2/release/golem_tts_google.wasm
+    componentName: tts-google
+    testComponents:
+      - ../common-rust/golem.yaml#release
+      - components-rust/test-tts/golem.yaml#release-google
+
+  # Deepgram Aura profiles
+  deepgram-debug:
+    wasmComponent: ../../tts/deepgram/target/wasm32-wasip2/debug/golem_tts_deepgram.wasm
+    componentName: tts-deepgram
+    testComponents:
+      - ../common-rust/golem.yaml#debug
+      - components-rust/test-tts/golem.yaml#debug-deepgram
+
+  deepgram-release:
+    wasmComponent: ../../tts/deepgram/target/wasm32-wasip2/release/golem_tts_deepgram.wasm
+    componentName: tts-deepgram
+    testComponents:
+      - ../common-rust/golem.yaml#release
+      - components-rust/test-tts/golem.yaml#release-deepgram
