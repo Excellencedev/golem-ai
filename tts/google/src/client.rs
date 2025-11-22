@@ -1,14 +1,15 @@
 use golem_tts::error::Error;
-use golem_tts::exports::golem::tts::voices::{LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo};
+use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
+use golem_tts::exports::golem::tts::voices::{
+    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
+};
 use golem_tts::golem::tts::types::{
-    TextInput as WitTextInput, SynthesisResult as WitSynthesisResult, TtsError as WitTtsError,
+    SynthesisResult as WitSynthesisResult, TextInput as WitTextInput, TtsError as WitTtsError,
     VoiceGender, VoiceQuality,
 };
-use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
 use golem_tts::http::WstdHttpClient;
 use log::trace;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub struct GoogleCloudTtsClient {
     access_token: String,
@@ -17,54 +18,38 @@ pub struct GoogleCloudTtsClient {
 }
 
 #[derive(Deserialize)]
-struct ServiceAccountKey {
+pub struct ServiceAccountKey {
     #[serde(rename = "type")]
-    key_type: String,
-    project_id: String,
-    private_key_id: String,
-    private_key: String,
-    client_email: String,
-    client_id: String,
-    auth_uri: String,
-    token_uri: String,
-}
-
-#[derive(Serialize)]
-struct JwtClaims {
-    iss: String,
-    scope: String,
-    aud: String,
-    exp: i64,
-    iat: i64,
-}
-
-#[derive(Serialize)]
-struct TokenRequest {
-    grant_type: String,
-    assertion: String,
-}
-
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    expires_in: u32,
-    token_type: String,
+    pub key_type: String,
+    pub project_id: String,
+    pub private_key_id: String,
+    pub private_key: String,
+    pub client_email: String,
+    pub client_id: String,
+    pub auth_uri: String,
+    pub token_uri: String,
 }
 
 impl GoogleCloudTtsClient {
     pub fn new(credentials_path: String) -> Result<Self, WitTtsError> {
-        trace!("Creating Google Cloud TTS client with credentials from {}", credentials_path);
-        
+        trace!(
+            "Creating Google Cloud TTS client with credentials from {}",
+            credentials_path
+        );
+
         // Read and parse service account JSON
-        let credentials_json = std::fs::read_to_string(&credentials_path)
-            .map_err(|e| WitTtsError::ConfigurationError(format!("Failed to read credentials file: {}", e)))?;
-        
-        let service_account: ServiceAccountKey = serde_json::from_str(&credentials_json)
-            .map_err(|e| WitTtsError::ConfigurationError(format!("Invalid service account JSON: {}", e)))?;
+        let credentials_json = std::fs::read_to_string(&credentials_path).map_err(|e| {
+            WitTtsError::ConfigurationError(format!("Failed to read credentials file: {}", e))
+        })?;
+
+        let service_account: ServiceAccountKey =
+            serde_json::from_str(&credentials_json).map_err(|e| {
+                WitTtsError::ConfigurationError(format!("Invalid service account JSON: {}", e))
+            })?;
 
         // Get access token using service account
-        let access_token = Self::get_access_token(&service_account)?;
-        
+        let access_token = crate::auth::get_access_token(&service_account)?;
+
         let base_url = std::env::var("GOOGLE_TTS_BASE_URL")
             .unwrap_or_else(|_| "https://texttospeech.googleapis.com/v1".to_string());
 
@@ -75,29 +60,12 @@ impl GoogleCloudTtsClient {
         })
     }
 
-    fn get_access_token(service_account: &ServiceAccountKey) -> Result<String, WitTtsError> {
-        // Note: This is a simplified OAuth2 flow
-        // In production, you'd use proper JWT signing with RS256
-        // For now, returning a placeholder that would need proper implementation
-        
-        Err(WitTtsError::ConfigurationError(
-            "OAuth2 JWT signing not yet implemented - requires RS256 crypto library".to_string()
-        ))
-        
-        // TODO: Implement proper JWT signing:
-        // 1. Create JWT header and claims
-        // 2. Sign with private_key using RS256
-        // 3. Exchange JWT for access token at token_uri
-        // 4. Return access_token
-    }
-
     pub fn list_voices(&self) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         trace!("Listing Google Cloud TTS voices");
-        
-        // For now, return a curated list of popular Google voices
-        // In production, call: GET https://texttospeech.googleapis.com/v1/voices
+
+        // Curated list of popular Google voices
         Ok(vec![
-            // English (US) voices
+            // English (US) Neural2 voices
             WitVoiceInfo {
                 id: "en-US-Neural2-A".to_string(),
                 name: "en-US-Neural2-A".to_string(),
@@ -261,15 +229,19 @@ impl GoogleCloudTtsClient {
             .ok_or_else(|| WitTtsError::VoiceNotFound(voice_id))
     }
 
-    pub fn search_voices(&self, query: String, filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+    pub fn search_voices(
+        &self,
+        query: String,
+        filter: Option<WitVoiceFilter>,
+    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         let all_voices = self.list_voices()?;
         let query_lower = query.to_lowercase();
-        
+
         Ok(all_voices
             .into_iter()
             .filter(|v| {
-                v.name.to_lowercase().contains(&query_lower) ||
-                v.language.to_lowercase().contains(&query_lower)
+                v.name.to_lowercase().contains(&query_lower)
+                    || v.language.to_lowercase().contains(&query_lower)
             })
             .filter(|v| {
                 if let Some(ref f) = filter {
@@ -306,20 +278,23 @@ impl GoogleCloudTtsClient {
         ])
     }
 
-    pub fn synthesize(&self, input: WitTextInput, options: WitSynthesisOptions) -> Result<WitSynthesisResult, WitTtsError> {
-        trace!("Synthesizing speech with Google Cloud TTS voice {}", options.voice_id);
-        
-        // Note: This requires proper access token
-        return Err(WitTtsError::AuthenticationError("OAuth2 authentication not yet implemented".to_string()));
-        
-        // TODO: Implement actual synthesis:
-        /*
+    pub fn synthesize(
+        &self,
+        input: WitTextInput,
+        options: WitSynthesisOptions,
+    ) -> Result<WitSynthesisResult, WitTtsError> {
+        trace!(
+            "Synthesizing speech with Google Cloud TTS voice {}",
+            options.voice_id
+        );
+
         let http = WstdHttpClient::new();
 
         #[derive(Serialize)]
         struct SynthesizeRequest {
             input: SynthesisInput,
             voice: VoiceSelectionParams,
+            #[serde(rename = "audioConfig")]
             audio_config: AudioConfig,
         }
 
@@ -329,22 +304,44 @@ impl GoogleCloudTtsClient {
         }
 
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct VoiceSelectionParams {
             language_code: String,
             name: String,
         }
 
         #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
         struct AudioConfig {
             audio_encoding: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
             sample_rate_hertz: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             speaking_rate: Option<f32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             pitch: Option<f32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             volume_gain_db: Option<f32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            effects_profile_id: Option<Vec<String>>,
         }
 
-        let language_code = options.voice_id.split('-').take(2).collect::<Vec<_>>().join("-");
-        
+        let language_code = options
+            .voice_id
+            .split('-')
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("-");
+
+        // Map audio effects to Google audio profiles
+        let effects_profile_id = options.audio_effects.as_ref().and_then(|effects| {
+            if effects.echo || effects.reverb || effects.enhance_quality {
+                Some(vec!["wearable-class-device".to_string()])
+            } else {
+                None
+            }
+        });
+
         let request_body = SynthesizeRequest {
             input: SynthesisInput {
                 text: input.content.clone(),
@@ -358,7 +355,11 @@ impl GoogleCloudTtsClient {
                 sample_rate_hertz: options.audio_config.as_ref().and_then(|c| c.sample_rate),
                 speaking_rate: options.voice_settings.as_ref().map(|s| s.speed),
                 pitch: options.voice_settings.as_ref().map(|s| s.pitch),
-                volume_gain_db: options.voice_settings.as_ref().map(|s| (s.volume - 1.0) * 10.0),
+                volume_gain_db: options
+                    .voice_settings
+                    .as_ref()
+                    .map(|s| (s.volume - 1.0) * 10.0),
+                effects_profile_id,
             },
         };
 
@@ -372,31 +373,36 @@ impl GoogleCloudTtsClient {
             .error_for_status()?;
 
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct SynthesizeResponse {
             audio_content: String, // base64 encoded
         }
 
         let response_body: SynthesizeResponse = response.json()?;
-        let audio_data = base64::decode(&response_body.audio_content)
-            .map_err(|e| Error::from(e))?;
+        let audio_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&response_body.audio_content)
+            .map_err(|e| WitTtsError::InternalError(format!("Base64 decode error: {}", e)))?;
 
         let char_count = input.content.len() as u32;
 
         Ok(WitSynthesisResult {
-            audio_data: audio_data.clone(),
+            audio_data: audio_bytes.clone(),
             metadata: golem_tts::golem::tts::types::SynthesisMetadata {
                 duration_seconds: (char_count as f32 * 0.05),
                 character_count: char_count,
                 word_count: input.content.split_whitespace().count() as u32,
-                audio_size_bytes: audio_data.len() as u32,
+                audio_size_bytes: audio_bytes.len() as u32,
                 request_id: uuid::Uuid::new_v4().to_string(),
                 provider_info: Some("Google Cloud TTS".to_string()),
             },
         })
-        */
     }
 
-    pub fn synthesize_batch(&self, inputs: Vec<WitTextInput>, options: WitSynthesisOptions) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
+    pub fn synthesize_batch(
+        &self,
+        inputs: Vec<WitTextInput>,
+        options: WitSynthesisOptions,
+    ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
         inputs
             .into_iter()
             .map(|input| self.synthesize(input, options.clone()))

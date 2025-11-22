@@ -1,10 +1,10 @@
 # golem-ai
 
-WebAssembly Components providing API for modules LLM, WebSearch, Video and Search for various providers.
+WebAssembly Components providing API for modules LLM, WebSearch, Video, Search, TTS (Text-to-Speech), and STT (Speech-to-Text) for various providers.
 
 ## Modules
 
-This repository contains four modules, each with multiple provider implementations:
+This repository contains six modules, each with multiple provider implementations:
 
 ### LLM Module
 Provides a unified API for various Large Language Model providers:
@@ -37,6 +37,21 @@ Provides a unified API for various Video Generation providers:
 - **Kling** - Kling video generation and lip-sync
 - **Runway** - Runway ML video generation
 
+### TTS (Text-to-Speech) Module
+Provides a unified API for various Text-to-Speech providers:
+- **ElevenLabs** - High-quality AI voices with voice cloning
+- **AWS Polly** - Amazon's text-to-speech service
+- **Google Cloud TTS** - Google's Neural2 and WaveNet voices
+- **Deepgram Aura** - Real-time conversational AI voices
+
+### STT (Speech-to-Text) Module
+Provides a unified API for various Speech-to-Text providers:
+- **OpenAI Whisper** - OpenAI's Whisper transcription
+- **AWS Transcribe** - Amazon's transcription service
+- **Google Cloud STT** - Google's speech recognition
+- **Azure Speech** - Microsoft's speech-to-text
+- **Deepgram** - Real-time speech recognition
+
 ## Component Versions
 
 Each provider has two versions available:
@@ -57,12 +72,16 @@ Every component **exports** the same unified interface for its module, defined i
 - WebSearch: [`websearch/wit/golem-web-search.wit`](websearch/wit/golem-web-search.wit)
 - Search: [`search/wit/golem-search.wit`](search/wit/golem-search.wit)
 - Video: [`video/wit/golem-video.wit`](video/wit/golem-video.wit)
+- TTS: [`tts/wit/golem-tts.wit`](tts/wit/golem-tts.wit)
+- STT: [`stt/wit/golem-stt.wit`](stt/wit/golem-stt.wit)
 
 For detailed information about each module and its providers, see the individual README files:
 - [LLM Module](llm/README.md)
 - [WebSearch Module](websearch/README.md)
 - [Search Module](search/README.md)
 - [Video Module](video/README.md)
+- [TTS Module](tts/README.md)
+- [STT Module](stt/README.md)
 
 ## Using with Golem
 
@@ -123,6 +142,8 @@ For detailed information about available profiles and environment variables for 
 - [WebSearch Module](websearch/README.md)
 - [Search Module](search/README.md)
 - [Video Module](video/README.md)
+- [TTS Module](tts/README.md)
+- [STT Module](stt/README.md)
 
 ### Using without Golem
 
@@ -142,6 +163,8 @@ Individual test directories for each module (with examples):
 - [Search Test](test/search/)
 - [Video Test](test/video/)
 - [Video Advanced Test](test/video-advanced/)
+- [TTS Test](test/tts/)
+- [STT Test](test/stt/)
 
 ### Running the examples
 
@@ -197,7 +220,7 @@ Some of the important tasks are:
 **Note**: `cargo make` command build, release-build, build-portable, release-build-portable, wit, build-test-components, can be used with 
 `cargo make <command> <module>` to target only the selected module. (e.g. `cargo make build llm`, `cargo make wit video`)
 
-The `test` directory contains a **Golem application** for testing various features of the LLM, WebSearch, Video and Search components.
+The `test` directory contains a **Golem application** for testing various features of the LLM, WebSearch, Video, Search, TTS, and STT components.
 Check [the Golem documentation](https://learn.golem.cloud/quickstart) to learn how to install Golem and `golem-cli` to
 run these tests.
 

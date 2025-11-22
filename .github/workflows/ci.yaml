@@ -63,6 +63,8 @@ jobs:
         run: cargo binstall --force cargo-component@0.21.1
       - name: Build all
         run: cargo make build-all
+      - name: Build TTS providers
+        run: cargo make --cwd tts build
   build-test-components:
     runs-on: ubuntu-latest
     steps:
@@ -91,6 +93,10 @@ jobs:
         run: cargo binstall --force wac-cli --locked --no-confirm
       - name: Build all test components
         run: cargo make release-build-test-components
+      - name: Build TTS test components
+        run: |
+          cd test/tts/components-rust/test-tts
+          cargo component build --release
   golem-exec-tests:
     runs-on: ubuntu-latest
     steps:
@@ -380,6 +386,8 @@ jobs:
         run: cargo binstall --force cargo-component@0.21.1
       - name: Build all components in release
         run: cargo make release-build-all
+      - name: Build TTS components in release
+        run: cargo make --cwd tts release-build
       - name: Login GH CLI
         shell: bash
         run: gh auth login --with-token < <(echo ${{ secrets.GITHUB_TOKEN }})

@@ -1,9 +1,11 @@
 use golem_tts::error::Error;
-use golem_tts::exports::golem::tts::voices::{LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo};
-use golem_tts::golem::tts::types::{
-    TextInput as WitTextInput, SynthesisResult as WitSynthesisResult, TtsError as WitTtsError,
-};
 use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
+use golem_tts::exports::golem::tts::voices::{
+    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
+};
+use golem_tts::golem::tts::types::{
+    SynthesisResult as WitSynthesisResult, TextInput as WitTextInput, TtsError as WitTtsError,
+};
 use golem_tts::http::WstdHttpClient;
 use log::trace;
 use serde::{Deserialize, Serialize};
@@ -11,19 +13,26 @@ use serde::{Deserialize, Serialize};
 pub struct DeepgramClient {
     api_key: String,
     base_url: String,
+    api_version: String,
 }
 
 impl DeepgramClient {
     pub fn new(api_key: String) -> Self {
         let base_url = std::env::var("DEEPGRAM_BASE_URL")
-            .unwrap_or_else(|_| "https://api.deepgram.com/v1".to_string());
-        
-        Self { api_key, base_url }
+            .unwrap_or_else(|_| "https://api.deepgram.com".to_string());
+        let api_version =
+            std::env::var("DEEPGRAM_API_VERSION").unwrap_or_else(|_| "v1".to_string());
+
+        Self {
+            api_key,
+            base_url,
+            api_version,
+        }
     }
 
     pub fn list_voices(&self) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         trace!("Listing Deepgram Aura voices");
-        
+
         // Deepgram Aura voices (as of 2024)
         Ok(vec![
             WitVoiceInfo {
@@ -172,15 +181,21 @@ impl DeepgramClient {
             .ok_or_else(|| WitTtsError::VoiceNotFound(voice_id))
     }
 
-    pub fn search_voices(&self, query: String, filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+    pub fn search_voices(
+        &self,
+        query: String,
+        filter: Option<WitVoiceFilter>,
+    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         let all_voices = self.list_voices()?;
         let query_lower = query.to_lowercase();
-        
+
         Ok(all_voices
             .into_iter()
             .filter(|v| {
-                v.name.to_lowercase().contains(&query_lower) ||
-                v.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&query_lower))
+                v.name.to_lowercase().contains(&query_lower)
+                    || v.description
+                        .as_ref()
+                        .map_or(false, |d| d.to_lowercase().contains(&query_lower))
             })
             .filter(|v| {
                 if let Some(ref f) = filter {
@@ -201,18 +216,23 @@ impl DeepgramClient {
     }
 
     pub fn list_languages(&self) -> Result<Vec<WitLanguageInfo>, WitTtsError> {
-        Ok(vec![
-            WitLanguageInfo {
-                code: "en".to_string(),
-                name: "English".to_string(),
-                native_name: "English".to_string(),
-                voice_count: 9,
-            },
-        ])
+        Ok(vec![WitLanguageInfo {
+            code: "en".to_string(),
+            name: "English".to_string(),
+            native_name: "English".to_string(),
+            voice_count: 9,
+        }])
     }
 
-    pub fn synthesize(&self, input: WitTextInput, options: WitSynthesisOptions) -> Result<WitSynthesisResult, WitTtsError> {
-        trace!("Synthesizing speech with Deepgram voice {}", options.voice_id);
+    pub fn synthesize(
+        &self,
+        input: WitTextInput,
+        options: WitSynthesisOptions,
+    ) -> Result<WitSynthesisResult, WitTtsError> {
+        trace!(
+            "Synthesizing speech with Deepgram voice {}",
+            options.voice_id
+        );
         let http = WstdHttpClient::new();
 
         #[derive(Serialize)]
@@ -225,8 +245,11 @@ impl DeepgramClient {
         };
 
         // Deepgram uses query parameters for configuration
-        let mut url = format!("{}/speak?model={}", self.base_url, options.voice_id);
-        
+        let mut url = format!(
+            "{}/{}/speak?model={}",
+            self.base_url, self.api_version, options.voice_id
+        );
+
         // Add encoding format
         if let Some(ref audio_config) = options.audio_config {
             let encoding = match audio_config.format {
@@ -239,7 +262,7 @@ impl DeepgramClient {
                 _ => "mp3",
             };
             url = format!("{}&encoding={}", url, encoding);
-            
+
             if let Some(sample_rate) = audio_config.sample_rate {
                 url = format!("{}&sample_rate={}", url, sample_rate);
             }
@@ -269,7 +292,11 @@ impl DeepgramClient {
         })
     }
 
-    pub fn synthesize_batch(&self, inputs: Vec<WitTextInput>, options: WitSynthesisOptions) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
+    pub fn synthesize_batch(
+        &self,
+        inputs: Vec<WitTextInput>,
+        options: WitSynthesisOptions,
+    ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
         inputs
             .into_iter()
             .map(|input| self.synthesize(input, options.clone()))
