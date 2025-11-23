@@ -394,7 +394,7 @@ impl PollyClient {
         }
 
         let response = http_request
-            .body(json_payload)?
+            .body(json_payload.into_bytes())
             .send()?
             .error_for_status()?;
 

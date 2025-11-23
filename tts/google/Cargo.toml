@@ -12,7 +12,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [features]
-default = ["durability"]
+default = []
 durability = ["golem-rust/durability", "golem-tts/durability"]
 
 [dependencies]
@@ -25,7 +25,6 @@ serde_json = { workspace = true }
 wit-bindgen-rt = { workspace = true }
 base64 = { workspace = true }
 uuid = { version = "1.17.0", features = ["v4"] }
-jsonwebtoken = "9.3"
 
 [package.metadata.component]
 package = "golem:tts-google"

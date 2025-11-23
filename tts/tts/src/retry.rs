@@ -24,12 +24,12 @@ where
                 attempt += 1;
                 let backoff_ms = INITIAL_BACKOFF_MS * 2_u64.pow(attempt - 1);
                 trace!("Retry attempt {} after {}ms", attempt, backoff_ms);
-                
+
                 // Sleep using wstd
                 block_on(async {
-                    wstd::time::sleep(Duration::from_millis(backoff_ms)).await;
+                    wstd::task::sleep(wstd::time::Duration::from_millis(backoff_ms)).await;
                 });
-                
+
                 // Continue to next iteration which will call f() again
                 continue;
             }

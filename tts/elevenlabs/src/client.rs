@@ -1,12 +1,16 @@
 use golem_tts::error::Error;
-use golem_tts::exports::golem::tts::voices::{LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo};
-use golem_tts::exports::golem::tts::streaming::{StreamSession as WitStreamSession, StreamStatus as WitStreamStatus};
 use golem_tts::exports::golem::tts::advanced::AudioSample as WitAudioSample;
-use golem_tts::golem::tts::types::{
-    TextInput as WitTextInput, SynthesisResult as WitSynthesisResult,
-    AudioChunk as WitAudioChunk, TtsError as WitTtsError,
+use golem_tts::exports::golem::tts::streaming::{
+    StreamSession as WitStreamSession, StreamStatus as WitStreamStatus,
 };
 use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
+use golem_tts::exports::golem::tts::voices::{
+    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
+};
+use golem_tts::golem::tts::types::{
+    AudioChunk as WitAudioChunk, SynthesisResult as WitSynthesisResult, TextInput as WitTextInput,
+    TtsError as WitTtsError,
+};
 use golem_tts::http::WstdHttpClient;
 use log::trace;
 use serde::{Deserialize, Serialize};
@@ -32,14 +36,17 @@ impl ElevenLabsClient {
     pub fn new(api_key: String) -> Self {
         let base_url = std::env::var("ELEVENLABS_BASE_URL")
             .unwrap_or_else(|_| "https://api.elevenlabs.io/v1".to_string());
-        
+
         Self { api_key, base_url }
     }
 
-    pub fn list_voices(&self, _filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+    pub fn list_voices(
+        &self,
+        _filter: Option<WitVoiceFilter>,
+    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         trace!("Listing voices from ElevenLabs");
         let http = WstdHttpClient::new();
-        
+
         let response = http
             .get(&format!("{}/voices", self.base_url))
             .header("xi-api-key", &self.api_key)
@@ -47,13 +54,17 @@ impl ElevenLabsClient {
             .error_for_status()?;
 
         let voices_response: VoicesResponse = response.json()?;
-        Ok(voices_response.voices.into_iter().map(|v| v.into()).collect())
+        Ok(voices_response
+            .voices
+            .into_iter()
+            .map(|v| v.into())
+            .collect())
     }
 
     pub fn get_voice(&self, voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
         trace!("Getting voice {} from ElevenLabs", voice_id);
         let http = WstdHttpClient::new();
-        
+
         let response = http
             .get(&format!("{}/voices/{}", self.base_url, voice_id))
             .header("xi-api-key", &self.api_key)
@@ -64,20 +75,26 @@ impl ElevenLabsClient {
         Ok(voice.into())
     }
 
-    pub fn search_voices(&self, query: String, filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
+    pub fn search_voices(
+        &self,
+        query: String,
+        filter: Option<WitVoiceFilter>,
+    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         let all_voices = self.list_voices(filter)?;
         let query_lower = query.to_lowercase();
-        
+
         Ok(all_voices
             .into_iter()
             .filter(|v| {
-                v.name.to_lowercase().contains(&query_lower) ||
-                v.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&query_lower))
+                v.name.to_lowercase().contains(&query_lower)
+                    || v.description
+                        .as_ref()
+                        .map_or(false, |d| d.to_lowercase().contains(&query_lower))
             })
             .collect())
     }
 
-    pub fn list_languages(&self) -> Result<Vec<WitLanguageInfo>, WitTtsError > {
+    pub fn list_languages(&self) -> Result<Vec<WitLanguageInfo>, WitTtsError> {
         // ElevenLabs supports these languages
         Ok(vec![
             WitLanguageInfo {
@@ -131,13 +148,23 @@ impl ElevenLabsClient {
         ])
     }
 
-    pub fn synthesize(&self, input: WitTextInput, options: WitSynthesisOptions) -> Result<WitSynthesisResult, WitTtsError> {
-        trace!("Synthesizing speech with ElevenLabs voice {}", options.voice_id);
+    pub fn synthesize(
+        &self,
+        input: WitTextInput,
+        options: WitSynthesisOptions,
+    ) -> Result<WitSynthesisResult, WitTtsError> {
+        trace!(
+            "Synthesizing speech with ElevenLabs voice {}",
+            options.voice_id
+        );
         let http = WstdHttpClient::new();
 
         let request_body = SynthesizeRequest {
             text: input.content.clone(),
-            model_id: options.model_version.clone().unwrap_or_else(|| "eleven_monolingual_v1".to_string()),
+            model_id: options
+                .model_version
+                .clone()
+                .unwrap_or_else(|| "eleven_monolingual_v1".to_string()),
             voice_settings: options.voice_settings.as_ref().map(|vs| VoiceSettings {
                 stability: vs.stability.unwrap_or(0.5),
                 similarity_boost: vs.similarity.unwrap_or(0.75),
@@ -147,7 +174,10 @@ impl ElevenLabsClient {
         };
 
         let response = http
-            .post(&format!("{}/text-to-speech/{}", self.base_url, options.voice_id))
+            .post(&format!(
+                "{}/text-to-speech/{}",
+                self.base_url, options.voice_id
+            ))
             .header("xi-api-key", &self.api_key)
             .header("accept", "audio/mpeg")
             .json(&request_body)?
@@ -170,25 +200,35 @@ impl ElevenLabsClient {
         })
     }
 
-    pub fn synthesize_batch(&self, inputs: Vec<WitTextInput>, options: WitSynthesisOptions) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
+    pub fn synthesize_batch(
+        &self,
+        inputs: Vec<WitTextInput>,
+        options: WitSynthesisOptions,
+    ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
         inputs
             .into_iter()
             .map(|input| self.synthesize(input, options.clone()))
             .collect()
     }
 
-    pub fn create_stream(&self, options: WitSynthesisOptions) -> Result<WitStreamSession, WitTtsError> {
+    pub fn create_stream(
+        &self,
+        options: WitSynthesisOptions,
+    ) -> Result<WitStreamSession, WitTtsError> {
         let session_id = Uuid::new_v4().to_string();
-        
+
         let sessions = STREAM_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()));
         let mut sessions = sessions.lock().unwrap();
-        
-        sessions.insert(session_id.clone(), StreamSessionState {
-            chunks: vec![],
-            current_index: 0,
-            finished: false,
-            status: WitStreamStatus::Ready,
-        });
+
+        sessions.insert(
+            session_id.clone(),
+            StreamSessionState {
+                chunks: vec![],
+                current_index: 0,
+                finished: false,
+                status: WitStreamStatus::Ready,
+            },
+        );
 
         Ok(WitStreamSession {
             session_id,
@@ -197,12 +237,16 @@ impl ElevenLabsClient {
         })
     }
 
-    pub fn stream_send_text(&self, session_id: String, input: WitTextInput) -> Result<(), WitTtsError> {
+    pub fn stream_send_text(
+        &self,
+        session_id: String,
+        input: WitTextInput,
+    ) -> Result<(), WitTtsError> {
         let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
             WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
         })?;
         let mut sessions = sessions.lock().unwrap();
-        
+
         let session = sessions.get_mut(&session_id).ok_or_else(|| {
             WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
         })?;
@@ -237,7 +281,7 @@ impl ElevenLabsClient {
             WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
         })?;
         let mut sessions = sessions.lock().unwrap();
-        
+
         let session = sessions.get_mut(&session_id).ok_or_else(|| {
             WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
         })?;
@@ -248,12 +292,15 @@ impl ElevenLabsClient {
         Ok(())
     }
 
-    pub fn stream_receive_chunk(&self, session_id: String) -> Result<Option<WitAudioChunk>, WitTtsError> {
+    pub fn stream_receive_chunk(
+        &self,
+        session_id: String,
+    ) -> Result<Option<WitAudioChunk>, WitTtsError> {
         let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
             WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
         })?;
         let mut sessions = sessions.lock().unwrap();
-        
+
         let session = sessions.get_mut(&session_id).ok_or_else(|| {
             WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
         })?;
@@ -280,7 +327,7 @@ impl ElevenLabsClient {
             WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
         })?;
         let sessions = sessions.lock().unwrap();
-        
+
         let session = sessions.get(&session_id).ok_or_else(|| {
             WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
         })?;
@@ -293,7 +340,7 @@ impl ElevenLabsClient {
             WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
         })?;
         let sessions = sessions.lock().unwrap();
-        
+
         let session = sessions.get(&session_id).ok_or_else(|| {
             WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
         })?;
@@ -306,24 +353,43 @@ impl ElevenLabsClient {
             WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
         })?;
         let mut sessions = sessions.lock().unwrap();
-        
+
         sessions.remove(&session_id);
         Ok(())
     }
 
-    pub fn create_voice_clone(&self, name: String, audio_samples: Vec<WitAudioSample>, description: Option<String>) -> Result<String, WitTtsError> {
+    pub fn create_voice_clone(
+        &self,
+        name: String,
+        audio_samples: Vec<WitAudioSample>,
+        description: Option<String>,
+    ) -> Result<String, WitTtsError> {
         trace!("Creating voice clone: {}", name);
-        
+
         // In a real implementation, this would use multipart/form-data
         // For now, return unsupported
-        Err(WitTtsError::UnsupportedOperation("Voice cloning requires multipart upload, not yet implemented".to_string()))
+        Err(WitTtsError::UnsupportedOperation(
+            "Voice cloning requires multipart upload, not yet implemented".to_string(),
+        ))
     }
 
-    pub fn convert_voice(&self, _input_audio: Vec<u8>, _target_voice_id: String, _preserve_timing: Option<bool>) -> Result<Vec<u8>, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("Voice conversion not yet implemented".to_string()))
+    pub fn convert_voice(
+        &self,
+        _input_audio: Vec<u8>,
+        _target_voice_id: String,
+        _preserve_timing: Option<bool>,
+    ) -> Result<Vec<u8>, WitTtsError> {
+        Err(WitTtsError::UnsupportedOperation(
+            "Voice conversion not yet implemented".to_string(),
+        ))
     }
 
-    pub fn generate_sound_effect(&self, description: String, duration_seconds: Option<f32>, _style_influence: Option<f32>) -> Result<Vec<u8>, WitTtsError> {
+    pub fn generate_sound_effect(
+        &self,
+        description: String,
+        duration_seconds: Option<f32>,
+        _style_influence: Option<f32>,
+    ) -> Result<Vec<u8>, WitTtsError> {
         trace!("Generating sound effect: {}", description);
         let http = WstdHttpClient::new();
 
@@ -355,15 +421,15 @@ struct VoicesResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct ElevenLabsVoice {
-    voice_id: String,
-    name: String,
+pub(crate) struct ElevenLabsVoice {
+    pub(crate) voice_id: String,
+    pub(crate) name: String,
     #[serde(default)]
-    description: Option<String>,
+    pub(crate) description: Option<String>,
     #[serde(default)]
-    labels: HashMap<String, String>,
+    pub(crate) preview_url: Option<String>,
     #[serde(default)]
-    preview_url: Option<String>,
+    pub(crate) labels: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]

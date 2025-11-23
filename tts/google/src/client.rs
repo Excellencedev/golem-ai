@@ -1,3 +1,4 @@
+use base64::Engine;
 use golem_tts::error::Error;
 use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
 use golem_tts::exports::golem::tts::voices::{
@@ -31,31 +32,27 @@ pub struct ServiceAccountKey {
 }
 
 impl GoogleCloudTtsClient {
-    pub fn new(credentials_path: String) -> Result<Self, WitTtsError> {
-        trace!(
-            "Creating Google Cloud TTS client with credentials from {}",
-            credentials_path
-        );
+    /// Create a new Google Cloud TTS client using environment variables
+    ///
+    /// Required environment variables:
+    /// - GOOGLE_ACCESS_TOKEN: OAuth2 access token (get via: gcloud auth print-access-token)
+    /// - GOOGLE_PROJECT_ID: Google Cloud project ID
+    ///
+    /// Optional:
+    /// - GOOGLE_TTS_BASE_URL: Override the base URL (default: https://texttospeech.googleapis.com/v1)
+    pub fn new() -> Result<Self, WitTtsError> {
+        trace!("Creating Google Cloud TTS client from environment variables");
 
-        // Read and parse service account JSON
-        let credentials_json = std::fs::read_to_string(&credentials_path).map_err(|e| {
-            WitTtsError::ConfigurationError(format!("Failed to read credentials file: {}", e))
-        })?;
-
-        let service_account: ServiceAccountKey =
-            serde_json::from_str(&credentials_json).map_err(|e| {
-                WitTtsError::ConfigurationError(format!("Invalid service account JSON: {}", e))
-            })?;
-
-        // Get access token using service account
-        let access_token = crate::auth::get_access_token(&service_account)?;
+        // Get access token from environment
+        let access_token = crate::auth::get_access_token_from_env()?;
+        let project_id = crate::auth::get_project_id_from_env()?;
 
         let base_url = std::env::var("GOOGLE_TTS_BASE_URL")
             .unwrap_or_else(|_| "https://texttospeech.googleapis.com/v1".to_string());
 
         Ok(Self {
             access_token,
-            project_id: service_account.project_id,
+            project_id,
             base_url,
         })
     }
@@ -334,13 +331,12 @@ impl GoogleCloudTtsClient {
             .join("-");
 
         // Map audio effects to Google audio profiles
-        let effects_profile_id = options.audio_effects.as_ref().and_then(|effects| {
-            if effects.echo || effects.reverb || effects.enhance_quality {
-                Some(vec!["wearable-class-device".to_string()])
-            } else {
-                None
-            }
-        });
+        // TODO: AudioEffects is a flags type - need to implement proper flag checking
+        let effects_profile_id: Option<Vec<String>> = None;
+        // options.audio_effects.as_ref().and_then(|_effects| {
+        //     // Would need to check flags properly here
+        //     Some(vec!["wearable-class-device".to_string()])
+        // });
 
         let request_body = SynthesizeRequest {
             input: SynthesisInput {
@@ -353,12 +349,12 @@ impl GoogleCloudTtsClient {
             audio_config: AudioConfig {
                 audio_encoding: "MP3".to_string(),
                 sample_rate_hertz: options.audio_config.as_ref().and_then(|c| c.sample_rate),
-                speaking_rate: options.voice_settings.as_ref().map(|s| s.speed),
-                pitch: options.voice_settings.as_ref().map(|s| s.pitch),
+                speaking_rate: options.voice_settings.as_ref().and_then(|s| s.speed),
+                pitch: options.voice_settings.as_ref().and_then(|s| s.pitch),
                 volume_gain_db: options
                     .voice_settings
                     .as_ref()
-                    .map(|s| (s.volume - 1.0) * 10.0),
+                    .and_then(|s| s.volume.map(|v| (v - 1.0) * 10.0)),
                 effects_profile_id,
             },
         };

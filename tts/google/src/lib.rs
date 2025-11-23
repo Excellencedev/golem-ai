@@ -22,68 +22,55 @@ use golem_tts::golem::tts::types::{
     TimingInfo as WitTimingInfo, TtsError as WitTtsError,
 };
 use golem_tts::{
-    config::with_config_key,
     durability::{DurableTts, ExtendedGuest},
     guest::{TtsAdvancedGuest, TtsStreamingGuest, TtsSynthesisGuest, TtsVoicesGuest},
 };
 
 struct GoogleComponent;
 
-impl GoogleComponent {
-    const ENV_VAR_NAME: &'static str = "GOOGLE_APPLICATION_CREDENTIALS";
-}
-
 impl TtsVoicesGuest for GoogleComponent {
     fn list_voices(filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
-            let client = GoogleCloudTtsClient::new(credentials_path)?;
-            let all_voices = client.list_voices()?;
+        let client = GoogleCloudTtsClient::new()?;
+        let all_voices = client.list_voices()?;
 
-            if let Some(f) = filter {
-                Ok(all_voices
-                    .into_iter()
-                    .filter(|v| {
-                        if let Some(ref lang) = f.language {
-                            if !v.language.starts_with(lang) {
-                                return false;
-                            }
+        if let Some(f) = filter {
+            Ok(all_voices
+                .into_iter()
+                .filter(|v| {
+                    if let Some(ref lang) = f.language {
+                        if !v.language.starts_with(lang) {
+                            return false;
                         }
-                        if let Some(gender) = f.gender {
-                            if v.gender != gender {
-                                return false;
-                            }
+                    }
+                    if let Some(gender) = f.gender {
+                        if v.gender != gender {
+                            return false;
                         }
-                        true
-                    })
-                    .collect())
-            } else {
-                Ok(all_voices)
-            }
-        })
+                    }
+                    true
+                })
+                .collect())
+        } else {
+            Ok(all_voices)
+        }
     }
 
     fn get_voice(voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
-            let client = GoogleCloudTtsClient::new(credentials_path)?;
-            client.get_voice(voice_id)
-        })
+        let client = GoogleCloudTtsClient::new()?;
+        client.get_voice(voice_id)
     }
 
     fn search_voices(
         query: String,
         filter: Option<WitVoiceFilter>,
     ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
-            let client = GoogleCloudTtsClient::new(credentials_path)?;
-            client.search_voices(query, filter)
-        })
+        let client = GoogleCloudTtsClient::new()?;
+        client.search_voices(query, filter)
     }
 
     fn list_languages() -> Result<Vec<WitLanguageInfo>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
-            let client = GoogleCloudTtsClient::new(credentials_path)?;
-            client.list_languages()
-        })
+        let client = GoogleCloudTtsClient::new()?;
+        client.list_languages()
     }
 }
 
@@ -92,20 +79,16 @@ impl TtsSynthesisGuest for GoogleComponent {
         input: WitTextInput,
         options: WitSynthesisOptions,
     ) -> Result<WitSynthesisResult, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
-            let client = GoogleCloudTtsClient::new(credentials_path)?;
-            client.synthesize(input, options)
-        })
+        let client = GoogleCloudTtsClient::new()?;
+        client.synthesize(input, options)
     }
 
     fn synthesize_batch(
         inputs: Vec<WitTextInput>,
         options: WitSynthesisOptions,
     ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |credentials_path| {
-            let client = GoogleCloudTtsClient::new(credentials_path)?;
-            client.synthesize_batch(inputs, options)
-        })
+        let client = GoogleCloudTtsClient::new()?;
+        client.synthesize_batch(inputs, options)
     }
 
     fn get_timing_marks(
@@ -279,8 +262,8 @@ impl TtsAdvancedGuest for GoogleComponent {
     }
 }
 
-impl ExtendedGuest for GoogleComponent {}
+impl golem_tts::durability::ExtendedGuest for GoogleComponent {}
 
-type DurableGoogleComponent = DurableTts<GoogleComponent>;
+type DurableGoogleComponent = golem_tts::durability::DurableTts<GoogleComponent>;
 
 golem_tts::export_tts!(DurableGoogleComponent with_types_in golem_tts);

@@ -1,8 +1,8 @@
+pub mod config;
 pub mod durability;
 pub mod error;
 pub mod guest;
 pub mod http;
-pub mod config;
 mod retry;
 
 wit_bindgen::generate!({
@@ -10,7 +10,6 @@ wit_bindgen::generate!({
     world: "tts-library",
     generate_all,
     generate_unused_types: true,
-    additional_derives: [PartialEq, golem_rust::FromValueAndType, golem_rust::IntoValue],
     pub_export_macro: true,
 });
 

@@ -65,7 +65,7 @@ impl PollyClient {
         }
 
         let response = http_request
-            .body(json_payload)?
+            .body(json_payload.into_bytes())
             .send()?
             .error_for_status()?;
 
@@ -81,11 +81,10 @@ impl PollyClient {
             let mark: SpeechMark = serde_json::from_str(line).map_err(|e| Error::Json(e))?;
 
             timing_marks.push(WitTimingInfo {
-                time_ms: mark.time,
-                mark_type: mark.mark_type.clone(),
-                text: mark.value.clone(),
-                start_offset: mark.start,
-                end_offset: mark.end,
+                start_time_seconds: (mark.time as f32) / 1000.0,
+                end_time_seconds: mark.end.map(|e| (e as f32) / 1000.0),
+                text_offset: mark.start,
+                mark_type: None, // TODO: Parse mark_type string to enum
             });
         }
 
@@ -106,14 +105,17 @@ impl PollyClient {
 
         let url = format!("{}{}", self.base_url, uri);
         let mut http_request = http
-            .put(&url)
+            .post(&url) // PUT doesn't exist, use POST
             .header("Content-Type", "application/x-pls+xml");
 
         for (k, v) in signed_headers {
             http_request = http_request.header(k, &v);
         }
 
-        http_request.body(content)?.send()?.error_for_status()?;
+        http_request
+            .body(content.into_bytes())
+            .send()?
+            .error_for_status()?;
 
         Ok(())
     }
