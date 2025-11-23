@@ -1,9 +1,6 @@
 pub mod config;
 pub mod durability;
 pub mod error;
-pub mod guest;
-pub mod http;
-mod retry;
 
 wit_bindgen::generate!({
     path: "../wit",
@@ -44,4 +41,8 @@ thread_local! {
     pub static LOGGING_STATE: RefCell<LoggingState> = const { RefCell::new(LoggingState {
         logging_initialized: false,
     }) };
+}
+
+pub fn init_logging() {
+    LOGGING_STATE.with_borrow_mut(|state| state.init());
 }

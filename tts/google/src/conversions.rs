@@ -1,5 +1,18 @@
-// Type conversions for Google Cloud TTS
-// Most type mapping happens inline in client.rs
+use golem_tts::golem::tts::types::{AudioFormat, VoiceGender};
 
-// Google uses voice IDs like "en-US-Neural2-A" and returns base64-encoded audio
-// The client handles the conversion between Google's API format and our WIT types
+pub fn audio_format_to_google(format: AudioFormat) -> &'static str {
+    match format {
+        AudioFormat::Mp3 => "MP3",
+        AudioFormat::Wav => "LINEAR16",
+        AudioFormat::OggOpus => "OGG_OPUS",
+        _ => "MP3",
+    }
+}
+
+pub fn parse_gender(gender: &str) -> VoiceGender {
+    match gender.to_lowercase().as_str() {
+        "male" => VoiceGender::Male,
+        "female" => VoiceGender::Female,
+        _ => VoiceGender::Neutral,
+    }
+}

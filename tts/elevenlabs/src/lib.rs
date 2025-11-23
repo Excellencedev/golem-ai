@@ -1,103 +1,149 @@
+// ElevenLabs TTS provider
 mod client;
 mod conversions;
 
-use client::ElevenLabsClient;
+use client::{ElevenLabsClient, Voice};
 use conversions::*;
-use golem_tts::{
-    config::with_config_key,
-    durability::{DurableTts, ExtendedGuest},
-    guest::{TtsAdvancedGuest, TtsSynthesisGuest, TtsStreamingGuest, TtsVoicesGuest},
-    LOGGING_STATE,
+use golem_tts::durability::{DurableTts, ExtendedGuest};
+use golem_tts::error::{invalid_text, unsupported, voice_not_found};
+use golem_tts::golem::tts::advanced::{
+    AudioSample, Guest as AdvancedGuest, LongFormJob, LongFormResult, PronunciationEntry,
+    VoiceDesignParams,
+};
+use golem_tts::golem::tts::streaming::{Guest as StreamingGuest, StreamSession, StreamStatus};
+use golem_tts::golem::tts::synthesis::{
+    Guest as SynthesisGuest, SynthesisOptions, ValidationResult,
 };
 use golem_tts::golem::tts::types::{
-    TextInput as WitTextInput, TimingInfo as WitTimingInfo, SynthesisResult as WitSynthesisResult,
-    AudioChunk as WitAudioChunk, TtsError as WitTtsError,
+    SynthesisResult, TextInput, TimingInfo, TtsError, VoiceGender, VoiceQuality,
 };
-use golem_tts::exports::golem::tts::voices::{
-    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
-};
-use golem_tts::exports::golem::tts::synthesis::{
-    SynthesisOptions as WitSynthesisOptions, ValidationResult as WitValidationResult,
-};
-use golem_tts::exports::golem::tts::streaming::{
-    StreamSession as WitStreamSession, StreamStatus as WitStreamStatus,
-};
-use golem_tts::exports::golem::tts::advanced::{
-    AudioSample as WitAudioSample, VoiceDesignParams as WitVoiceDesignParams,
-    PronunciationEntry as WitPronunciationEntry, LongFormJob as WitLongFormJob,
-    LongFormResult as WitLongFormResult,
-};
+use golem_tts::golem::tts::voices::{Guest as VoicesGuest, LanguageInfo, VoiceFilter, VoiceInfo};
+use log::{debug, info, trace};
 
 struct ElevenLabsComponent;
 
 impl ElevenLabsComponent {
-    const ENV_VAR_NAME: &'static str = "ELEVENLABS_API_KEY";
-}
-
-impl TtsVoicesGuest for ElevenLabsComponent {
-    fn list_voices(filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.list_voices(filter)
-        })
+    fn create_client() -> Result<ElevenLabsClient, TtsError> {
+        ElevenLabsClient::new()
     }
 
-    fn get_voice(voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.get_voice(voice_id)
-        })
-    }
-
-    fn search_voices(query: String, filter: Option<WitVoiceFilter>) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.search_voices(query, filter)
-        })
-    }
-
-    fn list_languages() -> Result<Vec<WitLanguageInfo>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.list_languages()
-        })
+    fn voice_to_info(voice: &Voice) -> VoiceInfo {
+        VoiceInfo {
+            id: voice.voice_id.clone(),
+            name: voice.name.clone(),
+            language: "en".to_string(),
+            additional_languages: vec![],
+            gender: voice
+                .description
+                .as_ref()
+                .map(|d| parse_gender(d))
+                .unwrap_or(VoiceGender::Neutral),
+            quality: VoiceQuality::Neural,
+            description: voice.description.clone(),
+            provider: "ElevenLabs".to_string(),
+            sample_rate: 44100,
+            is_custom: false,
+            is_cloned: false,
+            preview_url: voice.preview_url.clone(),
+            use_cases: vec!["general".to_string()],
+        }
     }
 }
 
-impl TtsSynthesisGuest for ElevenLabsComponent {
-    fn synthesize(input: WitTextInput, options: WitSynthesisOptions) -> Result<WitSynthesisResult, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.synthesize(input, options)
+impl VoicesGuest for ElevenLabsComponent {
+    fn list_voices(_filter: Option<VoiceFilter>) -> Result<Vec<VoiceInfo>, TtsError> {
+        debug!("ElevenLabs: Listing voices");
+        let client = Self::create_client()?;
+        let voices = client.list_voices()?;
+        Ok(voices.iter().map(|v| Self::voice_to_info(v)).collect())
+    }
+
+    fn get_voice(voice_id: String) -> Result<VoiceInfo, TtsError> {
+        trace!("ElevenLabs: Getting voice {}", voice_id);
+        let client = Self::create_client()?;
+        let voices = client.list_voices()?;
+        voices
+            .iter()
+            .find(|v| v.voice_id == voice_id)
+            .map(|v| Self::voice_to_info(v))
+            .ok_or_else(|| voice_not_found(voice_id))
+    }
+
+    fn search_voices(
+        query: String,
+        _filter: Option<VoiceFilter>,
+    ) -> Result<Vec<VoiceInfo>, TtsError> {
+        debug!("ElevenLabs: Searching voices: {}", query);
+        let client = Self::create_client()?;
+        let voices = client.list_voices()?;
+        let query_lower = query.to_lowercase();
+        Ok(voices
+            .iter()
+            .filter(|v| v.name.to_lowercase().contains(&query_lower))
+            .map(|v| Self::voice_to_info(v))
+            .collect())
+    }
+
+    fn list_languages() -> Result<Vec<LanguageInfo>, TtsError> {
+        Ok(vec![LanguageInfo {
+            code: "en".to_string(),
+            name: "English".to_string(),
+            native_name: "English".to_string(),
+            available_voices: 30,
+        }])
+    }
+}
+
+impl SynthesisGuest for ElevenLabsComponent {
+    fn synthesize(
+        input: TextInput,
+        options: SynthesisOptions,
+    ) -> Result<SynthesisResult, TtsError> {
+        info!("ElevenLabs: Synthesizing {} chars", input.content.len());
+
+        if input.content.is_empty() {
+            return Err(invalid_text("Text cannot be empty"));
+        }
+
+        let client = Self::create_client()?;
+        let response = client.text_to_speech(&input.content, &options.voice_id)?;
+
+        Ok(SynthesisResult {
+            audio_data: response.audio_data,
+            metadata: Some(response.metadata),
         })
     }
 
-    fn synthesize_batch(inputs: Vec<WitTextInput>, options: WitSynthesisOptions) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.synthesize_batch(inputs, options)
-        })
+    fn synthesize_batch(
+        inputs: Vec<TextInput>,
+        options: SynthesisOptions,
+    ) -> Result<Vec<SynthesisResult>, TtsError> {
+        info!("ElevenLabs: Batch synthesizing {} inputs", inputs.len());
+        inputs
+            .into_iter()
+            .map(|input| Self::synthesize(input, options.clone()))
+            .collect()
     }
 
-    fn get_timing_marks(_input: WitTextInput, _voice_id: String) -> Result<Vec<WitTimingInfo>, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs does not provide timing marks separately".to_string()))
+    fn get_timing_marks(_input: TextInput, _voice_id: String) -> Result<Vec<TimingInfo>, TtsError> {
+        Err(unsupported("ElevenLabs does not support timing marks"))
     }
 
-    fn validate_input(input: WitTextInput, _voice_id: String) -> Result<WitValidationResult, WitTtsError> {
+    fn validate_input(input: TextInput, _voice_id: String) -> Result<ValidationResult, TtsError> {
         let char_count = input.content.len() as u32;
         let is_valid = char_count > 0 && char_count <= 5000;
-        
-        Ok(WitValidationResult {
+
+        Ok(ValidationResult {
             is_valid,
             character_count: char_count,
             estimated_duration: Some(char_count as f32 * 0.05),
-            warnings: if char_count > 3000 {
-                vec!["Text is quite long, consider splitting".to_string()]
+            warnings: if char_count > 4000 {
+                vec!["Text approaching limit".to_string()]
             } else {
                 vec![]
             },
             errors: if !is_valid {
-                vec!["Text must be between 1 and 5000 characters".to_string()]
+                vec!["Text must be 1-5000 characters".to_string()]
             } else {
                 vec![]
             },
@@ -105,109 +151,107 @@ impl TtsSynthesisGuest for ElevenLabsComponent {
     }
 }
 
-impl TtsStreamingGuest for ElevenLabsComponent {
-    fn create_stream(options: WitSynthesisOptions) -> Result<WitStreamSession, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.create_stream(options)
-        })
+impl StreamingGuest for ElevenLabsComponent {
+    fn create_stream(_options: SynthesisOptions) -> Result<StreamSession, TtsError> {
+        Err(unsupported("ElevenLabs streaming not yet implemented"))
     }
 
-    fn stream_send_text(session_id: String, input: WitTextInput) -> Result<(), WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.stream_send_text(session_id, input)
-        })
+    fn stream_send_text(_session_id: String, _input: TextInput) -> Result<(), TtsError> {
+        Err(unsupported("Streaming not supported"))
     }
 
-    fn stream_finish(session_id: String) -> Result<(), WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.stream_finish(session_id)
-        })
+    fn stream_finish(_session_id: String) -> Result<(), TtsError> {
+        Err(unsupported("Streaming not supported"))
     }
 
-    fn stream_receive_chunk(session_id: String) -> Result<Option<WitAudioChunk>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.stream_receive_chunk(session_id)
-        })
+    fn stream_receive_chunk(_session_id: String) -> Result<Option<Vec<u8>>, TtsError> {
+        Err(unsupported("Streaming not supported"))
     }
 
-    fn stream_has_pending(session_id: String) -> Result<bool, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.stream_has_pending(session_id)
-        })
+    fn stream_has_pending(_session_id: String) -> Result<bool, TtsError> {
+        Err(unsupported("Streaming not supported"))
     }
 
-    fn stream_get_status(session_id: String) -> Result<WitStreamStatus, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.stream_get_status(session_id)
-        })
+    fn stream_get_status(_session_id: String) -> Result<StreamStatus, TtsError> {
+        Err(unsupported("Streaming not supported"))
     }
 
-    fn stream_close(session_id: String) -> Result<(), WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.stream_close(session_id)
-        })
+    fn stream_close(_session_id: String) -> Result<(), TtsError> {
+        Err(unsupported("Streaming not supported"))
     }
 }
 
-impl TtsAdvancedGuest for ElevenLabsComponent {
-    fn create_voice_clone(name: String, audio_samples: Vec<WitAudioSample>, description: Option<String>) -> Result<String, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.create_voice_clone(name, audio_samples, description)
-        })
+impl AdvancedGuest for ElevenLabsComponent {
+    fn create_voice_clone(
+        _name: String,
+        _audio_samples: Vec<AudioSample>,
+        _description: Option<String>,
+    ) -> Result<String, TtsError> {
+        Err(unsupported(
+            "Voice cloning requires multipart upload - not supported in WASI",
+        ))
     }
 
-    fn design_voice(_name: String, _characteristics: WitVoiceDesignParams) -> Result<String, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs does not support voice design".to_string()))
+    fn design_voice(
+        _name: String,
+        _characteristics: VoiceDesignParams,
+    ) -> Result<String, TtsError> {
+        Err(unsupported("ElevenLabs does not support voice design"))
     }
 
-    fn convert_voice(input_audio: Vec<u8>, target_voice_id: String, preserve_timing: Option<bool>) -> Result<Vec<u8>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.convert_voice(input_audio, target_voice_id, preserve_timing)
-        })
+    fn convert_voice(
+        _input_audio: Vec<u8>,
+        _target_voice_id: String,
+        _preserve_timing: Option<bool>,
+    ) -> Result<Vec<u8>, TtsError> {
+        Err(unsupported("Voice conversion not supported"))
     }
 
-    fn generate_sound_effect(description: String, duration_seconds: Option<f32>, style_influence: Option<f32>) -> Result<Vec<u8>, WitTtsError> {
-        with_config_key(Self::ENV_VAR_NAME, Err, |api_key| {
-            let client = ElevenLabsClient::new(api_key);
-            client.generate_sound_effect(description, duration_seconds, style_influence)
-        })
+    fn generate_sound_effect(
+        _description: String,
+        _duration_seconds: Option<f32>,
+        _style_influence: Option<f32>,
+    ) -> Result<Vec<u8>, TtsError> {
+        Err(unsupported(
+            "Sound effects require separate API - not yet implemented",
+        ))
     }
 
-    fn create_lexicon(_name: String, _language: String, _entries: Option<Vec<WitPronunciationEntry>>) -> Result<String, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs does not support custom lexicons".to_string()))
+    fn create_lexicon(
+        _name: String,
+        _language: String,
+        _entries: Option<Vec<PronunciationEntry>>,
+    ) -> Result<String, TtsError> {
+        Err(unsupported("ElevenLabs does not support lexicons"))
     }
 
-    fn add_lexicon_entry(_lexicon_id: String, _entry: WitPronunciationEntry) -> Result<(), WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs does not support custom lexicons".to_string()))
+    fn add_lexicon_entry(_lexicon_id: String, _entry: PronunciationEntry) -> Result<(), TtsError> {
+        Err(unsupported("Lexicon not supported"))
     }
 
-    fn remove_lexicon_entry(_lexicon_id: String, _word: String) -> Result<(), WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs does not support custom lexicons".to_string()))
+    fn remove_lexicon_entry(_lexicon_id: String, _word: String) -> Result<(), TtsError> {
+        Err(unsupported("Lexicon not supported"))
     }
 
-    fn export_lexicon(_lexicon_id: String) -> Result<String, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs does not support custom lexicons".to_string()))
+    fn export_lexicon(_lexicon_id: String) -> Result<String, TtsError> {
+        Err(unsupported("Lexicon not supported"))
     }
 
-    fn synthesize_long_form(_content: String, _voice_id: String, _output_location: String, _chapter_breaks: Option<Vec<u32>>) -> Result<WitLongFormJob, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs long-form synthesis not yet implemented".to_string()))
+    fn synthesize_long_form(
+        _content: String,
+        _voice_id: String,
+        _output_location: String,
+        _chapter_breaks: Option<Vec<u32>>,
+    ) -> Result<LongFormJob, TtsError> {
+        Err(unsupported("Long-form synthesis not yet implemented"))
     }
 
-    fn get_long_form_status(_job_id: String) -> Result<WitLongFormResult, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs long-form synthesis not yet implemented".to_string()))
+    fn get_long_form_status(_job_id: String) -> Result<LongFormResult, TtsError> {
+        Err(unsupported("Long-form not supported"))
     }
 
-    fn cancel_long_form(_job_id: String) -> Result<(), WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation("ElevenLabs long-form synthesis not yet implemented".to_string()))
+    fn cancel_long_form(_job_id: String) -> Result<(), TtsError> {
+        Err(unsupported("Long-form not supported"))
     }
 }
 

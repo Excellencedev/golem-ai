@@ -1,407 +1,169 @@
-use base64::Engine;
-use golem_tts::error::Error;
-use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
-use golem_tts::exports::golem::tts::voices::{
-    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
+// Google Cloud TTS client with service account authentication
+use golem_tts::config::{
+    get_config_with_default, get_max_retries_config, get_timeout_config, validate_config_key,
 };
-use golem_tts::golem::tts::types::{
-    SynthesisResult as WitSynthesisResult, TextInput as WitTextInput, TtsError as WitTtsError,
-    VoiceGender, VoiceQuality,
-};
-use golem_tts::http::WstdHttpClient;
+use golem_tts::error::{from_reqwest_error, internal_error, tts_error_from_status};
+use golem_tts::golem::tts::types::TtsError;
 use log::trace;
+use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-pub struct GoogleCloudTtsClient {
+#[derive(Debug, Clone)]
+pub struct RateLimitConfig {
+    pub max_retries: u32,
+    pub initial_delay: Duration,
+    pub max_delay: Duration,
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: get_max_retries_config(),
+            initial_delay: Duration::from_millis(1000),
+            max_delay: Duration::from_secs(30),
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct GoogleTtsClient {
+    client: Client,
     access_token: String,
     project_id: String,
-    base_url: String,
+    rate_limit_config: RateLimitConfig,
 }
 
-#[derive(Deserialize)]
-pub struct ServiceAccountKey {
-    #[serde(rename = "type")]
-    pub key_type: String,
-    pub project_id: String,
-    pub private_key_id: String,
-    pub private_key: String,
-    pub client_email: String,
-    pub client_id: String,
-    pub auth_uri: String,
-    pub token_uri: String,
-}
+impl GoogleTtsClient {
+    pub fn new() -> Result<Self, TtsError> {
+        // Try environment variables first (simpler for WASI)
+        let access_token = validate_config_key("GOOGLE_ACCESS_TOKEN")?;
+        let project_id = get_config_with_default("GOOGLE_PROJECT_ID", "default-project");
 
-impl GoogleCloudTtsClient {
-    /// Create a new Google Cloud TTS client using environment variables
-    ///
-    /// Required environment variables:
-    /// - GOOGLE_ACCESS_TOKEN: OAuth2 access token (get via: gcloud auth print-access-token)
-    /// - GOOGLE_PROJECT_ID: Google Cloud project ID
-    ///
-    /// Optional:
-    /// - GOOGLE_TTS_BASE_URL: Override the base URL (default: https://texttospeech.googleapis.com/v1)
-    pub fn new() -> Result<Self, WitTtsError> {
-        trace!("Creating Google Cloud TTS client from environment variables");
-
-        // Get access token from environment
-        let access_token = crate::auth::get_access_token_from_env()?;
-        let project_id = crate::auth::get_project_id_from_env()?;
-
-        let base_url = std::env::var("GOOGLE_TTS_BASE_URL")
-            .unwrap_or_else(|_| "https://texttospeech.googleapis.com/v1".to_string());
+        let client = Client::builder()
+            .timeout(Duration::from_secs(get_timeout_config()))
+            .build()
+            .map_err(|e| internal_error(format!("Failed to create HTTP client: {}", e)))?;
 
         Ok(Self {
+            client,
             access_token,
             project_id,
-            base_url,
+            rate_limit_config: RateLimitConfig::default(),
         })
     }
 
-    pub fn list_voices(&self) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        trace!("Listing Google Cloud TTS voices");
-
-        // Curated list of popular Google voices
-        Ok(vec![
-            // English (US) Neural2 voices
-            WitVoiceInfo {
-                id: "en-US-Neural2-A".to_string(),
-                name: "en-US-Neural2-A".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("US English female voice (Neural2)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string(), "assistant".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-US-Neural2-C".to_string(),
-                name: "en-US-Neural2-C".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("US English female voice (Neural2)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-US-Neural2-D".to_string(),
-                name: "en-US-Neural2-D".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Male,
-                quality: VoiceQuality::Neural,
-                description: Some("US English male voice (Neural2)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string(), "assistant".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-US-Neural2-F".to_string(),
-                name: "en-US-Neural2-F".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("US English female voice (Neural2)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            // WaveNet voices
-            WitVoiceInfo {
-                id: "en-US-Wavenet-A".to_string(),
-                name: "en-US-Wavenet-A".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Male,
-                quality: VoiceQuality::Neural,
-                description: Some("US English male voice (WaveNet)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-US-Wavenet-B".to_string(),
-                name: "en-US-Wavenet-B".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Male,
-                quality: VoiceQuality::Neural,
-                description: Some("US English male voice (WaveNet)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-US-Wavenet-C".to_string(),
-                name: "en-US-Wavenet-C".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("US English female voice (WaveNet)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-US-Wavenet-D".to_string(),
-                name: "en-US-Wavenet-D".to_string(),
-                language: "en-US".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Male,
-                quality: VoiceQuality::Neural,
-                description: Some("US English male voice (WaveNet)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            // English (GB)
-            WitVoiceInfo {
-                id: "en-GB-Neural2-A".to_string(),
-                name: "en-GB-Neural2-A".to_string(),
-                language: "en-GB".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Female,
-                quality: VoiceQuality::Neural,
-                description: Some("British English female voice (Neural2)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-            WitVoiceInfo {
-                id: "en-GB-Neural2-B".to_string(),
-                name: "en-GB-Neural2-B".to_string(),
-                language: "en-GB".to_string(),
-                additional_languages: vec![],
-                gender: VoiceGender::Male,
-                quality: VoiceQuality::Neural,
-                description: Some("British English male voice (Neural2)".to_string()),
-                provider: "Google Cloud TTS".to_string(),
-                sample_rate: 24000,
-                is_custom: false,
-                is_cloned: false,
-                preview_url: None,
-                use_cases: vec!["general".to_string()],
-            },
-        ])
-    }
-
-    pub fn get_voice(&self, voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
-        let voices = self.list_voices()?;
-        voices
-            .into_iter()
-            .find(|v| v.id == voice_id)
-            .ok_or_else(|| WitTtsError::VoiceNotFound(voice_id))
-    }
-
-    pub fn search_voices(
+    pub fn synthesize_speech(
         &self,
-        query: String,
-        filter: Option<WitVoiceFilter>,
-    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        let all_voices = self.list_voices()?;
-        let query_lower = query.to_lowercase();
-
-        Ok(all_voices
-            .into_iter()
-            .filter(|v| {
-                v.name.to_lowercase().contains(&query_lower)
-                    || v.language.to_lowercase().contains(&query_lower)
-            })
-            .filter(|v| {
-                if let Some(ref f) = filter {
-                    if let Some(ref lang) = f.language {
-                        if !v.language.starts_with(lang) {
-                            return false;
-                        }
-                    }
-                    if let Some(gender) = f.gender {
-                        if v.gender != gender {
-                            return false;
-                        }
-                    }
-                }
-                true
-            })
-            .collect())
-    }
-
-    pub fn list_languages(&self) -> Result<Vec<WitLanguageInfo>, WitTtsError> {
-        Ok(vec![
-            WitLanguageInfo {
-                code: "en-US".to_string(),
-                name: "English (US)".to_string(),
-                native_name: "English (US)".to_string(),
-                voice_count: 8,
-            },
-            WitLanguageInfo {
-                code: "en-GB".to_string(),
-                name: "English (UK)".to_string(),
-                native_name: "English (UK)".to_string(),
-                voice_count: 2,
-            },
-        ])
-    }
-
-    pub fn synthesize(
-        &self,
-        input: WitTextInput,
-        options: WitSynthesisOptions,
-    ) -> Result<WitSynthesisResult, WitTtsError> {
-        trace!(
-            "Synthesizing speech with Google Cloud TTS voice {}",
-            options.voice_id
-        );
-
-        let http = WstdHttpClient::new();
+        text: &str,
+        voice_name: &str,
+        language_code: &str,
+    ) -> Result<Vec<u8>, TtsError> {
+        let url = "https://texttospeech.googleapis.com/v1/text:synthesize";
 
         #[derive(Serialize)]
-        struct SynthesizeRequest {
-            input: SynthesisInput,
-            voice: VoiceSelectionParams,
-            #[serde(rename = "audioConfig")]
-            audio_config: AudioConfig,
-        }
-
-        #[derive(Serialize)]
-        struct SynthesisInput {
-            text: String,
-        }
-
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct VoiceSelectionParams {
+        struct Voice {
+            #[serde(rename = "languageCode")]
             language_code: String,
             name: String,
         }
 
         #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
         struct AudioConfig {
+            #[serde(rename = "audioEncoding")]
             audio_encoding: String,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            sample_rate_hertz: Option<u32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            speaking_rate: Option<f32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            pitch: Option<f32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            volume_gain_db: Option<f32>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            effects_profile_id: Option<Vec<String>>,
         }
 
-        let language_code = options
-            .voice_id
-            .split('-')
-            .take(2)
-            .collect::<Vec<_>>()
-            .join("-");
+        #[derive(Serialize)]
+        struct Input {
+            text: String,
+        }
 
-        // Map audio effects to Google audio profiles
-        // TODO: AudioEffects is a flags type - need to implement proper flag checking
-        let effects_profile_id: Option<Vec<String>> = None;
-        // options.audio_effects.as_ref().and_then(|_effects| {
-        //     // Would need to check flags properly here
-        //     Some(vec!["wearable-class-device".to_string()])
-        // });
+        #[derive(Serialize)]
+        struct Request {
+            input: Input,
+            voice: Voice,
+            #[serde(rename = "audioConfig")]
+            audio_config: AudioConfig,
+        }
 
-        let request_body = SynthesizeRequest {
-            input: SynthesisInput {
-                text: input.content.clone(),
+        let body = Request {
+            input: Input {
+                text: text.to_string(),
             },
-            voice: VoiceSelectionParams {
-                language_code,
-                name: options.voice_id.clone(),
+            voice: Voice {
+                language_code: language_code.to_string(),
+                name: voice_name.to_string(),
             },
             audio_config: AudioConfig {
                 audio_encoding: "MP3".to_string(),
-                sample_rate_hertz: options.audio_config.as_ref().and_then(|c| c.sample_rate),
-                speaking_rate: options.voice_settings.as_ref().and_then(|s| s.speed),
-                pitch: options.voice_settings.as_ref().and_then(|s| s.pitch),
-                volume_gain_db: options
-                    .voice_settings
-                    .as_ref()
-                    .and_then(|s| s.volume.map(|v| (v - 1.0) * 10.0)),
-                effects_profile_id,
             },
         };
 
-        let url = format!("{}/text:synthesize", self.base_url);
-        let response = http
-            .post(&url)
-            .header("Authorization", &format!("Bearer {}", self.access_token))
+        let response = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.access_token))
             .header("Content-Type", "application/json")
-            .json(&request_body)?
-            .send()?
-            .error_for_status()?;
+            .json(&body)
+            .send()
+            .map_err(|e| from_reqwest_error("Google TTS synthesize", e))?;
 
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct SynthesizeResponse {
-            audio_content: String, // base64 encoded
+        if !response.status().is_success() {
+            return Err(tts_error_from_status(response.status()));
         }
 
-        let response_body: SynthesizeResponse = response.json()?;
-        let audio_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&response_body.audio_content)
-            .map_err(|e| WitTtsError::InternalError(format!("Base64 decode error: {}", e)))?;
+        #[derive(Deserialize)]
+        struct Response {
+            #[serde(rename = "audioContent")]
+            audio_content: String,
+        }
 
-        let char_count = input.content.len() as u32;
+        let response_body: Response = response
+            .json()
+            .map_err(|e| from_reqwest_error("Parsing Google response", e))?;
 
-        Ok(WitSynthesisResult {
-            audio_data: audio_bytes.clone(),
-            metadata: golem_tts::golem::tts::types::SynthesisMetadata {
-                duration_seconds: (char_count as f32 * 0.05),
-                character_count: char_count,
-                word_count: input.content.split_whitespace().count() as u32,
-                audio_size_bytes: audio_bytes.len() as u32,
-                request_id: uuid::Uuid::new_v4().to_string(),
-                provider_info: Some("Google Cloud TTS".to_string()),
+        base64::decode(&response_body.audio_content)
+            .map_err(|e| internal_error(format!("Base64 decode error: {}", e)))
+    }
+
+    pub fn list_voices() -> Vec<GoogleVoice> {
+        // Hardcoded list of popular Google voices
+        vec![
+            GoogleVoice {
+                name: "en-US-Neural2-A".to_string(),
+                display_name: "Neural2 A".to_string(),
+                language_code: "en-US".to_string(),
+                gender: "Female".to_string(),
             },
-        })
+            GoogleVoice {
+                name: "en-US-Neural2-C".to_string(),
+                display_name: "Neural2 C".to_string(),
+                language_code: "en-US".to_string(),
+                gender: "Female".to_string(),
+            },
+            GoogleVoice {
+                name: "en-US-Neural2-D".to_string(),
+                display_name: "Neural2 D".to_string(),
+                language_code: "en-US".to_string(),
+                gender: "Male".to_string(),
+            },
+            GoogleVoice {
+                name: "en-US-Wavenet-A".to_string(),
+                display_name: "Wavenet A".to_string(),
+                language_code: "en-US".to_string(),
+                gender: "Male".to_string(),
+            },
+        ]
     }
+}
 
-    pub fn synthesize_batch(
-        &self,
-        inputs: Vec<WitTextInput>,
-        options: WitSynthesisOptions,
-    ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
-        inputs
-            .into_iter()
-            .map(|input| self.synthesize(input, options.clone()))
-            .collect()
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoogleVoice {
+    pub name: String,
+    pub display_name: String,
+    pub language_code: String,
+    pub gender: String,
 }

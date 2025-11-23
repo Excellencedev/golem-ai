@@ -1,449 +1,222 @@
-use golem_tts::error::Error;
-use golem_tts::exports::golem::tts::advanced::AudioSample as WitAudioSample;
-use golem_tts::exports::golem::tts::streaming::{
-    StreamSession as WitStreamSession, StreamStatus as WitStreamStatus,
+// ElevenLabs client with metadata support
+use golem_tts::config::{
+    get_endpoint_config, get_max_retries_config, get_timeout_config, validate_config_key,
 };
-use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
-use golem_tts::exports::golem::tts::voices::{
-    LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
-};
-use golem_tts::golem::tts::types::{
-    AudioChunk as WitAudioChunk, SynthesisResult as WitSynthesisResult, TextInput as WitTextInput,
-    TtsError as WitTtsError,
-};
-use golem_tts::http::WstdHttpClient;
+use golem_tts::error::{from_reqwest_error, tts_error_from_status};
+use golem_tts::golem::tts::types::{SynthesisMetadata, TtsError};
 use log::trace;
+use reqwest::{Client, Method, RequestBuilder, Response};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use uuid::Uuid;
+use std::time::Duration;
 
-static STREAM_SESSIONS: OnceLock<Mutex<HashMap<String, StreamSessionState>>> = OnceLock::new();
-
-struct StreamSessionState {
-    chunks: Vec<Vec<u8>>,
-    current_index: usize,
-    finished: bool,
-    status: WitStreamStatus,
+#[derive(Debug, Clone)]
+pub struct RateLimitConfig {
+    pub max_retries: u32,
+    pub initial_delay: Duration,
+    pub max_delay: Duration,
+    pub backoff_multiplier: f64,
 }
 
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: get_max_retries_config(),
+            initial_delay: Duration::from_millis(1000),
+            max_delay: Duration::from_secs(30),
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct ElevenLabsClient {
+    client: Client,
     api_key: String,
     base_url: String,
+    rate_limit_config: RateLimitConfig,
 }
 
 impl ElevenLabsClient {
-    pub fn new(api_key: String) -> Self {
-        let base_url = std::env::var("ELEVENLABS_BASE_URL")
-            .unwrap_or_else(|_| "https://api.elevenlabs.io/v1".to_string());
+    pub fn new() -> Result<Self, TtsError> {
+        let api_key = validate_config_key("ELEVENLABS_API_KEY")?;
+        let client = Client::builder()
+            .timeout(Duration::from_secs(get_timeout_config()))
+            .build()
+            .unwrap();
 
-        Self { api_key, base_url }
-    }
+        let base_url = get_endpoint_config("https://api.elevenlabs.io");
 
-    pub fn list_voices(
-        &self,
-        _filter: Option<WitVoiceFilter>,
-    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        trace!("Listing voices from ElevenLabs");
-        let http = WstdHttpClient::new();
-
-        let response = http
-            .get(&format!("{}/voices", self.base_url))
-            .header("xi-api-key", &self.api_key)
-            .send()?
-            .error_for_status()?;
-
-        let voices_response: VoicesResponse = response.json()?;
-        Ok(voices_response
-            .voices
-            .into_iter()
-            .map(|v| v.into())
-            .collect())
-    }
-
-    pub fn get_voice(&self, voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
-        trace!("Getting voice {} from ElevenLabs", voice_id);
-        let http = WstdHttpClient::new();
-
-        let response = http
-            .get(&format!("{}/voices/{}", self.base_url, voice_id))
-            .header("xi-api-key", &self.api_key)
-            .send()?
-            .error_for_status()?;
-
-        let voice: ElevenLabsVoice = response.json()?;
-        Ok(voice.into())
-    }
-
-    pub fn search_voices(
-        &self,
-        query: String,
-        filter: Option<WitVoiceFilter>,
-    ) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
-        let all_voices = self.list_voices(filter)?;
-        let query_lower = query.to_lowercase();
-
-        Ok(all_voices
-            .into_iter()
-            .filter(|v| {
-                v.name.to_lowercase().contains(&query_lower)
-                    || v.description
-                        .as_ref()
-                        .map_or(false, |d| d.to_lowercase().contains(&query_lower))
-            })
-            .collect())
-    }
-
-    pub fn list_languages(&self) -> Result<Vec<WitLanguageInfo>, WitTtsError> {
-        // ElevenLabs supports these languages
-        Ok(vec![
-            WitLanguageInfo {
-                code: "en".to_string(),
-                name: "English".to_string(),
-                native_name: "English".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "de".to_string(),
-                name: "German".to_string(),
-                native_name: "Deutsch".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "pl".to_string(),
-                name: "Polish".to_string(),
-                native_name: "Polski".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "es".to_string(),
-                name: "Spanish".to_string(),
-                native_name: "Español".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "it".to_string(),
-                name: "Italian".to_string(),
-                native_name: "Italiano".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "fr".to_string(),
-                name: "French".to_string(),
-                native_name: "Français".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "pt".to_string(),
-                name: "Portuguese".to_string(),
-                native_name: "Português".to_string(),
-                voice_count: 0,
-            },
-            WitLanguageInfo {
-                code: "hi".to_string(),
-                name: "Hindi".to_string(),
-                native_name: "हिन्दी".to_string(),
-                voice_count: 0,
-            },
-        ])
-    }
-
-    pub fn synthesize(
-        &self,
-        input: WitTextInput,
-        options: WitSynthesisOptions,
-    ) -> Result<WitSynthesisResult, WitTtsError> {
-        trace!(
-            "Synthesizing speech with ElevenLabs voice {}",
-            options.voice_id
-        );
-        let http = WstdHttpClient::new();
-
-        let request_body = SynthesizeRequest {
-            text: input.content.clone(),
-            model_id: options
-                .model_version
-                .clone()
-                .unwrap_or_else(|| "eleven_monolingual_v1".to_string()),
-            voice_settings: options.voice_settings.as_ref().map(|vs| VoiceSettings {
-                stability: vs.stability.unwrap_or(0.5),
-                similarity_boost: vs.similarity.unwrap_or(0.75),
-                style: vs.style.unwrap_or(0.0),
-                use_speaker_boost: true,
-            }),
-        };
-
-        let response = http
-            .post(&format!(
-                "{}/text-to-speech/{}",
-                self.base_url, options.voice_id
-            ))
-            .header("xi-api-key", &self.api_key)
-            .header("accept", "audio/mpeg")
-            .json(&request_body)?
-            .send()?
-            .error_for_status()?;
-
-        let audio_data = response.bytes().to_vec();
-        let char_count = input.content.len() as u32;
-
-        Ok(WitSynthesisResult {
-            audio_data: audio_data.clone(),
-            metadata: golem_tts::golem::tts::types::SynthesisMetadata {
-                duration_seconds: (char_count as f32 * 0.05),
-                character_count: char_count,
-                word_count: input.content.split_whitespace().count() as u32,
-                audio_size_bytes: audio_data.len() as u32,
-                request_id: Uuid::new_v4().to_string(),
-                provider_info: Some("ElevenLabs".to_string()),
-            },
+        Ok(Self {
+            client,
+            api_key,
+            base_url,
+            rate_limit_config: RateLimitConfig::default(),
         })
     }
 
-    pub fn synthesize_batch(
-        &self,
-        inputs: Vec<WitTextInput>,
-        options: WitSynthesisOptions,
-    ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
-        inputs
-            .into_iter()
-            .map(|input| self.synthesize(input, options.clone()))
-            .collect()
-    }
-
-    pub fn create_stream(
-        &self,
-        options: WitSynthesisOptions,
-    ) -> Result<WitStreamSession, WitTtsError> {
-        let session_id = Uuid::new_v4().to_string();
-
-        let sessions = STREAM_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut sessions = sessions.lock().unwrap();
-
-        sessions.insert(
-            session_id.clone(),
-            StreamSessionState {
-                chunks: vec![],
-                current_index: 0,
-                finished: false,
-                status: WitStreamStatus::Ready,
-            },
-        );
-
-        Ok(WitStreamSession {
-            session_id,
-            status: WitStreamStatus::Ready,
-            pending_chunks: 0,
-        })
-    }
-
-    pub fn stream_send_text(
-        &self,
-        session_id: String,
-        input: WitTextInput,
-    ) -> Result<(), WitTtsError> {
-        let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
-            WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
-        })?;
-        let mut sessions = sessions.lock().unwrap();
-
-        let session = sessions.get_mut(&session_id).ok_or_else(|| {
-            WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
-        })?;
-
-        // Synthesize immediately for simplicity (ElevenLabs streaming requires WebSocket)
-        let http = WstdHttpClient::new();
-        let model_id = std::env::var("ELEVENLABS_MODEL_VERSION")
-            .unwrap_or_else(|_| "eleven_monolingual_v1".to_string());
-
-        let request_body = SynthesizeRequest {
-            text: input.content,
-            model_id,
-            voice_settings: None,
-        };
-
-        let response = http
-            .post(&format!("{}/text-to-speech/placeholder", self.base_url))
+    fn create_request(&self, method: Method, url: &str) -> RequestBuilder {
+        self.client
+            .request(method, url)
             .header("xi-api-key", &self.api_key)
-            .header("accept", "audio/mpeg")
-            .json(&request_body)?
-            .send()?
-            .error_for_status()?;
-
-        session.chunks.push(response.bytes().to_vec());
-        session.status = WitStreamStatus::Processing;
-
-        Ok(())
+            .header("Content-Type", "application/json")
     }
 
-    pub fn stream_finish(&self, session_id: String) -> Result<(), WitTtsError> {
-        let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
-            WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
-        })?;
-        let mut sessions = sessions.lock().unwrap();
+    fn execute_with_retry<F>(&self, operation: F) -> Result<Response, TtsError>
+    where
+        F: Fn() -> Result<Response, TtsError>,
+    {
+        let mut delay = self.rate_limit_config.initial_delay;
+        let max_retries = self.rate_limit_config.max_retries;
 
-        let session = sessions.get_mut(&session_id).ok_or_else(|| {
-            WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
-        })?;
-
-        session.finished = true;
-        session.status = WitStreamStatus::Finished;
-
-        Ok(())
-    }
-
-    pub fn stream_receive_chunk(
-        &self,
-        session_id: String,
-    ) -> Result<Option<WitAudioChunk>, WitTtsError> {
-        let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
-            WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
-        })?;
-        let mut sessions = sessions.lock().unwrap();
-
-        let session = sessions.get_mut(&session_id).ok_or_else(|| {
-            WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
-        })?;
-
-        if session.current_index < session.chunks.len() {
-            let chunk_data = session.chunks[session.current_index].clone();
-            let is_final = session.current_index == session.chunks.len() - 1 && session.finished;
-            let seq_num = session.current_index as u32;
-            session.current_index += 1;
-
-            Ok(Some(WitAudioChunk {
-                data: chunk_data,
-                sequence_number: seq_num,
-                is_final,
-                timing_info: None,
-            }))
-        } else {
-            Ok(None)
+        for attempt in 0..=max_retries {
+            match operation() {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        return Ok(response);
+                    } else if response.status().as_u16() == 429 && attempt < max_retries {
+                        trace!("ElevenLabs rate limited, retrying");
+                        std::thread::sleep(delay);
+                        delay = std::cmp::min(
+                            Duration::from_millis(
+                                (delay.as_millis() as f64
+                                    * self.rate_limit_config.backoff_multiplier)
+                                    as u64,
+                            ),
+                            self.rate_limit_config.max_delay,
+                        );
+                        continue;
+                    } else if response.status().as_u16() >= 500 && attempt < max_retries {
+                        trace!("ElevenLabs server error, retrying");
+                        std::thread::sleep(delay);
+                        delay = std::cmp::min(
+                            Duration::from_millis(
+                                (delay.as_millis() as f64
+                                    * self.rate_limit_config.backoff_multiplier)
+                                    as u64,
+                            ),
+                            self.rate_limit_config.max_delay,
+                        );
+                        continue;
+                    } else {
+                        return Err(tts_error_from_status(response.status()));
+                    }
+                }
+                Err(e) => {
+                    if attempt < max_retries {
+                        std::thread::sleep(delay);
+                        delay = std::cmp::min(
+                            Duration::from_millis(
+                                (delay.as_millis() as f64
+                                    * self.rate_limit_config.backoff_multiplier)
+                                    as u64,
+                            ),
+                            self.rate_limit_config.max_delay,
+                        );
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         }
+
+        Err(TtsError::NetworkError("Max retries exceeded".to_string()))
     }
 
-    pub fn stream_has_pending(&self, session_id: String) -> Result<bool, WitTtsError> {
-        let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
-            WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
-        })?;
-        let sessions = sessions.lock().unwrap();
-
-        let session = sessions.get(&session_id).ok_or_else(|| {
-            WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
-        })?;
-
-        Ok(session.current_index < session.chunks.len())
-    }
-
-    pub fn stream_get_status(&self, session_id: String) -> Result<WitStreamStatus, WitTtsError> {
-        let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
-            WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
-        })?;
-        let sessions = sessions.lock().unwrap();
-
-        let session = sessions.get(&session_id).ok_or_else(|| {
-            WitTtsError::InvalidConfiguration(format!("Session {} not found", session_id))
-        })?;
-
-        Ok(session.status)
-    }
-
-    pub fn stream_close(&self, session_id: String) -> Result<(), WitTtsError> {
-        let sessions = STREAM_SESSIONS.get().ok_or_else(|| {
-            WitTtsError::InvalidConfiguration("Stream sessions not initialized".to_string())
-        })?;
-        let mut sessions = sessions.lock().unwrap();
-
-        sessions.remove(&session_id);
-        Ok(())
-    }
-
-    pub fn create_voice_clone(
+    pub fn text_to_speech(
         &self,
-        name: String,
-        audio_samples: Vec<WitAudioSample>,
-        description: Option<String>,
-    ) -> Result<String, WitTtsError> {
-        trace!("Creating voice clone: {}", name);
-
-        // In a real implementation, this would use multipart/form-data
-        // For now, return unsupported
-        Err(WitTtsError::UnsupportedOperation(
-            "Voice cloning requires multipart upload, not yet implemented".to_string(),
-        ))
-    }
-
-    pub fn convert_voice(
-        &self,
-        _input_audio: Vec<u8>,
-        _target_voice_id: String,
-        _preserve_timing: Option<bool>,
-    ) -> Result<Vec<u8>, WitTtsError> {
-        Err(WitTtsError::UnsupportedOperation(
-            "Voice conversion not yet implemented".to_string(),
-        ))
-    }
-
-    pub fn generate_sound_effect(
-        &self,
-        description: String,
-        duration_seconds: Option<f32>,
-        _style_influence: Option<f32>,
-    ) -> Result<Vec<u8>, WitTtsError> {
-        trace!("Generating sound effect: {}", description);
-        let http = WstdHttpClient::new();
+        text: &str,
+        voice_id: &str,
+    ) -> Result<SynthesisResponse, TtsError> {
+        let url = format!("{}/v1/text-to-speech/{}", self.base_url, voice_id);
 
         #[derive(Serialize)]
-        struct SoundEffectRequest {
+        struct Request {
             text: String,
-            duration_seconds: Option<f32>,
+            model_id: String,
         }
 
-        let request_body = SoundEffectRequest {
-            text: description,
-            duration_seconds,
+        let body = Request {
+            text: text.to_string(),
+            model_id: "eleven_monolingual_v1".to_string(),
         };
 
-        let response = http
-            .post(&format!("{}/sound-generation", self.base_url))
-            .header("xi-api-key", &self.api_key)
-            .json(&request_body)?
-            .send()?
-            .error_for_status()?;
+        let char_count = text.chars().count() as u32;
 
-        Ok(response.bytes().to_vec())
+        let response = self.execute_with_retry(|| {
+            self.create_request(Method::POST, &url)
+                .json(&body)
+                .send()
+                .map_err(|e| from_reqwest_error("ElevenLabs text_to_speech", e))
+        })?;
+
+        let audio_data = response
+            .bytes()
+            .map(|b| b.to_vec())
+            .map_err(|e| from_reqwest_error("Reading ElevenLabs response", e))?;
+
+        // Create metadata
+        let audio_size = audio_data.len() as u32;
+        let duration_seconds = estimate_audio_duration(&audio_data);
+        let word_count = text.split_whitespace().count() as u32;
+
+        let metadata = SynthesisMetadata {
+            duration_seconds,
+            character_count: char_count,
+            word_count,
+            audio_size_bytes: audio_size,
+            request_id: format!("elevenlabs-{}", chrono::Utc::now().timestamp()),
+            provider_info: Some("ElevenLabs TTS - MP3 44.1kHz".to_string()),
+        };
+
+        Ok(SynthesisResponse {
+            audio_data,
+            metadata,
+        })
+    }
+
+    pub fn list_voices(&self) -> Result<Vec<Voice>, TtsError> {
+        let url = format!("{}/v1/voices", self.base_url);
+
+        let response = self.execute_with_retry(|| {
+            self.create_request(Method::GET, &url)
+                .send()
+                .map_err(|e| from_reqwest_error("ElevenLabs list_voices", e))
+        })?;
+
+        #[derive(Deserialize)]
+        struct VoicesResponse {
+            voices: Vec<Voice>,
+        }
+
+        let voices_response: VoicesResponse = response
+            .json()
+            .map_err(|e| from_reqwest_error("Parsing ElevenLabs voices", e))?;
+
+        Ok(voices_response.voices)
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct VoicesResponse {
-    voices: Vec<ElevenLabsVoice>,
+#[derive(Debug, Clone)]
+pub struct SynthesisResponse {
+    pub audio_data: Vec<u8>,
+    pub metadata: SynthesisMetadata,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct ElevenLabsVoice {
-    pub(crate) voice_id: String,
-    pub(crate) name: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Voice {
+    pub voice_id: String,
+    pub name: String,
     #[serde(default)]
-    pub(crate) description: Option<String>,
+    pub description: Option<String>,
     #[serde(default)]
-    pub(crate) preview_url: Option<String>,
-    #[serde(default)]
-    pub(crate) labels: HashMap<String, String>,
+    pub preview_url: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct SynthesizeRequest {
-    text: String,
-    model_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    voice_settings: Option<VoiceSettings>,
-}
-
-#[derive(Debug, Serialize)]
-struct VoiceSettings {
-    stability: f32,
-    similarity_boost: f32,
-    style: f32,
-    use_speaker_boost: bool,
+fn estimate_audio_duration(audio_data: &[u8]) -> f32 {
+    // MP3 at 128kbps ~= 16000 bytes/second
+    if audio_data.is_empty() {
+        return 0.0;
+    }
+    (audio_data.len() as f32) / 16000.0
 }

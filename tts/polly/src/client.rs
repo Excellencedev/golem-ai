@@ -1,4 +1,3 @@
-use golem_tts::error::Error;
 use golem_tts::exports::golem::tts::synthesis::SynthesisOptions as WitSynthesisOptions;
 use golem_tts::exports::golem::tts::voices::{
     LanguageInfo as WitLanguageInfo, VoiceFilter as WitVoiceFilter, VoiceInfo as WitVoiceInfo,
@@ -8,8 +7,9 @@ use golem_tts::golem::tts::types::{
     VoiceGender, VoiceQuality,
 };
 use golem_tts::http::WstdHttpClient;
+use golem_tts::retry::retry_with_backoff;
 use hmac::{Hmac, Mac};
-use log::trace;
+use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -32,6 +32,7 @@ impl PollyClient {
     ) -> Self {
         let base_url = format!("https://polly.{}.amazonaws.com", region);
 
+        debug!("Initialized AWS Polly client for region: {}", region);
         Self {
             access_key_id,
             secret_access_key,
@@ -126,8 +127,9 @@ impl PollyClient {
     pub fn list_voices(&self) -> Result<Vec<WitVoiceInfo>, WitTtsError> {
         trace!("Listing AWS Polly voices");
 
-        // Popular Polly voices
-        Ok(vec![
+        // Curated list of popular AWS Polly Neural voices
+        // Note: For dynamic voice discovery, implement AWS Polly DescribeVoices API
+        let voices = vec![
             WitVoiceInfo {
                 id: "Joanna".to_string(),
                 name: "Joanna".to_string(),
@@ -278,15 +280,22 @@ impl PollyClient {
                 preview_url: None,
                 use_cases: vec!["general".to_string(), "news".to_string()],
             },
-        ])
+        ];
+
+        debug!("Listed {} AWS Polly voices", voices.len());
+        Ok(voices)
     }
 
     pub fn get_voice(&self, voice_id: String) -> Result<WitVoiceInfo, WitTtsError> {
+        trace!("Getting Polly voice: {}", voice_id);
         let voices = self.list_voices()?;
         voices
             .into_iter()
             .find(|v| v.id == voice_id)
-            .ok_or_else(|| WitTtsError::VoiceNotFound(voice_id))
+            .ok_or_else(|| {
+                warn!("Polly voice not found: {}", voice_id);
+                WitTtsError::VoiceNotFound(voice_id)
+            })
     }
 
     pub fn search_voices(
@@ -345,10 +354,17 @@ impl PollyClient {
         input: WitTextInput,
         options: WitSynthesisOptions,
     ) -> Result<WitSynthesisResult, WitTtsError> {
-        trace!(
-            "Synthesizing speech with AWS Polly voice {}",
+        debug!(
+            "Synthesizing {} chars with AWS Polly voice: {}",
+            input.content.len(),
             options.voice_id
         );
+
+        // Validate input
+        if input.content.trim().is_empty() {
+            warn!("Empty content provided for synthesis");
+            return Err(WitTtsError::InvalidText("Text cannot be empty".to_string()));
+        }
 
         let http = WstdHttpClient::new();
 
@@ -375,7 +391,8 @@ impl PollyClient {
                 .map(|sr| sr.to_string()),
         };
 
-        let json_payload = serde_json::to_string(&request_body).map_err(|e| Error::Json(e))?;
+        let json_payload = serde_json::to_string(&request_body)
+            .map_err(|e| WitTtsError::InternalError(format!("JSON serialization error: {}", e)))?;
 
         let host = self
             .base_url
@@ -386,21 +403,49 @@ impl PollyClient {
         let signed_headers =
             self.sign_request("POST", "/v1/speech", "", &headers, &json_payload)?;
 
+        // Retry with backoff for AWS API calls
         let url = format!("{}/v1/speech", self.base_url);
-        let mut http_request = http.post(&url).header("Content-Type", "application/json");
+        let result = retry_with_backoff(|| {
+            let mut http_request = http.post(&url).header("Content-Type", "application/json");
 
-        for (k, v) in signed_headers {
-            http_request = http_request.header(k, &v);
-        }
+            for (k, v) in &signed_headers {
+                http_request = http_request.header(*k, v);
+            }
 
-        let response = http_request
-            .body(json_payload.into_bytes())
-            .send()?
-            .error_for_status()?;
+            let response = http_request
+                .body(json_payload.clone().into_bytes())
+                .send()?;
 
-        let audio_data = response.bytes();
+            // Check for AWS-specific errors
+            if response.status >= 400 {
+                let error_text = response
+                    .text()
+                    .unwrap_or_else(|_| "Unknown AWS error".to_string());
+                warn!("AWS Polly error {}: {}", response.status, error_text);
+                return Err(match response.status {
+                    400 => WitTtsError::InvalidText(error_text),
+                    403 => WitTtsError::Unauthorized("Invalid AWS credentials".to_string()),
+                    429 => WitTtsError::RateLimited(60),
+                    503 => WitTtsError::ServiceUnavailable("AWS Polly unavailable".to_string()),
+                    _ => WitTtsError::SynthesisFailed(format!(
+                        "AWS error {}: {}",
+                        response.status, error_text
+                    )),
+                }
+                .into());
+            }
+
+            Ok(response)
+        })?;
+
+        let audio_data = result.bytes();
         let audio_vec = audio_data.to_vec();
         let char_count = input.content.len() as u32;
+
+        debug!(
+            "Synthesized {} bytes of audio with AWS Polly",
+            audio_vec.len()
+        );
 
         Ok(WitSynthesisResult {
             audio_data: audio_vec.clone(),
@@ -420,6 +465,7 @@ impl PollyClient {
         inputs: Vec<WitTextInput>,
         options: WitSynthesisOptions,
     ) -> Result<Vec<WitSynthesisResult>, WitTtsError> {
+        debug!("Batch synthesizing {} inputs with AWS Polly", inputs.len());
         inputs
             .into_iter()
             .map(|input| self.synthesize(input, options.clone()))

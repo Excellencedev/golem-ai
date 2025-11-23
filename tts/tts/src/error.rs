@@ -1,27 +1,85 @@
-use crate::exports::golem::tts::types::TtsError as WitTtsError;
-use derive_more::From;
+use crate::exports::golem::tts::types::{QuotaInfo, QuotaUnit, TtsError};
 
-#[derive(Debug, From)]
-pub enum Error {
-    Http(http::Error),
-    WstdHttp(wstd::http::Error),
-    Json(serde_json::Error),
-    Url(url::ParseError),
-    Utf8(std::string::FromUtf8Error),
-    IoError(std::io::Error),
-    WitTts(WitTtsError),
+pub fn unsupported(_what: impl AsRef<str>) -> TtsError {
+    TtsError::UnsupportedOperation(_what.as_ref().to_string())
 }
 
-impl From<Error> for WitTtsError {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::Http(e) => WitTtsError::NetworkError(format!("HTTP error: {:?}", e)),
-            Error::WstdHttp(e) => WitTtsError::NetworkError(format!("WSTD HTTP error: {:?}", e)),
-            Error::Json(e) => WitTtsError::InternalError(format!("JSON error: {}", e)),
-            Error::Url(e) => WitTtsError::InvalidConfiguration(format!("URL error: {}", e)),
-            Error::Utf8(e) => WitTtsError::InternalError(format!("UTF-8 error: {}", e)),
-            Error::IoError(e) => WitTtsError::InternalError(format!("IO error: {}", e)),
-            Error::WitTts(e) => e,
+pub fn invalid_text(message: impl AsRef<str>) -> TtsError {
+    TtsError::InvalidText(message.as_ref().to_string())
+}
+
+pub fn internal_error(message: impl AsRef<str>) -> TtsError {
+    TtsError::InternalError(message.as_ref().to_string())
+}
+
+pub fn voice_not_found(voice_id: impl AsRef<str>) -> TtsError {
+    TtsError::VoiceNotFound(voice_id.as_ref().to_string())
+}
+
+pub fn network_error(message: impl AsRef<str>) -> TtsError {
+    TtsError::NetworkError(message.as_ref().to_string())
+}
+
+pub fn rate_limited(retry_after_seconds: u32) -> TtsError {
+    TtsError::RateLimited(retry_after_seconds)
+}
+
+pub fn quota_exceeded(used: u32, limit: u32, reset_time: u64, unit: QuotaUnit) -> TtsError {
+    TtsError::QuotaExceeded(QuotaInfo {
+        used,
+        limit,
+        reset_time,
+        unit,
+    })
+}
+
+pub fn synthesis_failed(message: impl AsRef<str>) -> TtsError {
+    TtsError::SynthesisFailed(message.as_ref().to_string())
+}
+
+pub fn service_unavailable(message: impl AsRef<str>) -> TtsError {
+    TtsError::ServiceUnavailable(message.as_ref().to_string())
+}
+
+pub fn unauthorized(message: impl AsRef<str>) -> TtsError {
+    TtsError::Unauthorized(message.as_ref().to_string())
+}
+
+pub fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> TtsError {
+    if err.is_timeout() {
+        TtsError::NetworkError(format!("{}: timeout", details.as_ref()))
+    } else if err.is_request() {
+        TtsError::NetworkError(format!("{}: connection failed", details.as_ref()))
+    } else {
+        TtsError::InternalError(format!("{}: {err}", details.as_ref()))
+    }
+}
+
+pub fn tts_error_from_status(status: reqwest::StatusCode) -> TtsError {
+    use reqwest::StatusCode;
+
+    match status {
+        StatusCode::TOO_MANY_REQUESTS => TtsError::RateLimited(60), // Default 60 seconds
+        StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => {
+            TtsError::NetworkError("Request timeout".to_string())
         }
+        StatusCode::NOT_FOUND => TtsError::VoiceNotFound("Voice not found".to_string()),
+        StatusCode::BAD_REQUEST => TtsError::InvalidText("Bad request".to_string()),
+        StatusCode::UNAUTHORIZED => TtsError::Unauthorized("Authentication failed".to_string()),
+        StatusCode::FORBIDDEN => TtsError::AccessDenied("Access denied".to_string()),
+        StatusCode::PAYMENT_REQUIRED => TtsError::QuotaExceeded(QuotaInfo {
+            used: 0,
+            limit: 0,
+            reset_time: 0,
+            unit: QuotaUnit::Characters,
+        }),
+        StatusCode::UNPROCESSABLE_ENTITY => {
+            TtsError::SynthesisFailed("Unable to process synthesis request".to_string())
+        }
+        StatusCode::SERVICE_UNAVAILABLE => {
+            TtsError::ServiceUnavailable("Service temporarily unavailable".to_string())
+        }
+        _ if status.is_client_error() => TtsError::InvalidText(format!("Client error: {status}")),
+        _ => TtsError::InternalError(format!("Server error: {status}")),
     }
 }

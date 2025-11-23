@@ -12,19 +12,18 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [features]
-default = []
+default = ["durability"]
 durability = ["golem-rust/durability", "golem-tts/durability"]
 
 [dependencies]
 golem-tts = { workspace = true }
 golem-rust = { workspace = true }
 log = { workspace = true }
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 wit-bindgen-rt = { workspace = true }
 base64 = { workspace = true }
-uuid = { version = "1.17.0", features = ["v4"] }
+reqwest = { workspace = true }
 
 [package.metadata.component]
 package = "golem:tts-google"
@@ -44,4 +43,4 @@ path = "wit"
 
 [package.metadata.component.target.dependencies]
 "golem:tts" = { path = "wit/deps/golem-tts" }
-"wasi:io" = { path = "wit/deps/wasiio" }
+"wasi:io" = { path = "wit/deps/wasi:io"}
