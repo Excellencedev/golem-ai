@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 package = "test:tts"
 
 [package.metadata.component.target]
-path = "wit"
+path = "../../wit"
 
 [package.metadata.component.target.dependencies]
-"golem:tts" = { path = "wit/deps/golem-tts" }
+"golem:tts" = { path = "../../wit/deps/golem-tts" }

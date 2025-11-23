@@ -1,0 +1,20 @@
+package test:tts;
+
+interface test-tts-api {
+  test1: func() -> result<string, string>;
+  test2: func() -> result<string, string>;
+  test3: func() -> result<string, string>;
+  test4: func() -> result<string, string>;
+  test5: func() -> result<string, string>;
+  test6: func() -> result<string, string>;
+  test7: func() -> result<string, string>;
+}
+
+world test-tts {
+  import golem:tts/types@1.0.0;
+  import golem:tts/voices@1.0.0;
+  import golem:tts/synthesis@1.0.0;
+  import golem:tts/streaming@1.0.0;
+  import golem:tts/advanced@1.0.0;
+  export test-tts-api;
+}
