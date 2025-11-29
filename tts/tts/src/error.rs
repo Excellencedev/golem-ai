@@ -83,3 +83,29 @@ pub fn tts_error_from_status(status: reqwest::StatusCode) -> TtsError {
         _ => TtsError::InternalError(format!("Server error: {status}")),
     }
 }
+
+/// Create error for invalid audio format
+pub fn invalid_audio_format(format: impl AsRef<str>) -> TtsError {
+    TtsError::InvalidText(format!("Unsupported audio format: {}", format.as_ref()))
+}
+
+/// Create error for configuration issues
+pub fn config_error(message: impl AsRef<str>) -> TtsError {
+    TtsError::InternalError(format!("Configuration error: {}", message.as_ref()))
+}
+
+/// Create error with context
+pub fn with_context(error: TtsError, context: impl AsRef<str>) -> TtsError {
+    match error {
+        TtsError::NetworkError(msg) => {
+            TtsError::NetworkError(format!("{}: {}", context.as_ref(), msg))
+        }
+        TtsError::InternalError(msg) => {
+            TtsError::InternalError(format!("{}: {}", context.as_ref(), msg))
+        }
+        TtsError::SynthesisFailed(msg) => {
+            TtsError::SynthesisFailed(format!("{}: {}", context.as_ref(), msg))
+        }
+        other => other,
+    }
+}

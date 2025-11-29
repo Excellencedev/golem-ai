@@ -89,7 +89,7 @@ impl VoicesGuest for ElevenLabsComponent {
             code: "en".to_string(),
             name: "English".to_string(),
             native_name: "English".to_string(),
-            available_voices: 30,
+            voice_count: 30,
         }])
     }
 }

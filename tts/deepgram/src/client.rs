@@ -315,6 +315,7 @@ pub struct Model {
 
 pub fn get_available_models() -> Vec<Model> {
     vec![
+        // American English Female Voices
         Model {
             name: "Aura Asteria".to_string(),
             voice_id: "aura-asteria-en".to_string(),
@@ -346,16 +347,6 @@ pub fn get_available_models() -> Vec<Model> {
             use_cases: vec!["presentation".to_string(), "professional".to_string()],
         },
         Model {
-            name: "Aura Athena".to_string(),
-            voice_id: "aura-athena-en".to_string(),
-            language: "en".to_string(),
-            accent: "British".to_string(),
-            gender: "Female".to_string(),
-            age: "Adult".to_string(),
-            characteristics: vec!["elegant".to_string(), "sophisticated".to_string()],
-            use_cases: vec!["narration".to_string(), "presentation".to_string()],
-        },
-        Model {
             name: "Aura Hera".to_string(),
             voice_id: "aura-hera-en".to_string(),
             language: "en".to_string(),
@@ -365,6 +356,18 @@ pub fn get_available_models() -> Vec<Model> {
             characteristics: vec!["warm".to_string(), "empathetic".to_string()],
             use_cases: vec!["customer service".to_string(), "assistant".to_string()],
         },
+        // British English Female Voice
+        Model {
+            name: "Aura Athena".to_string(),
+            voice_id: "aura-athena-en".to_string(),
+            language: "en".to_string(),
+            accent: "British".to_string(),
+            gender: "Female".to_string(),
+            age: "Adult".to_string(),
+            characteristics: vec!["elegant".to_string(), "sophisticated".to_string()],
+            use_cases: vec!["narration".to_string(), "presentation".to_string()],
+        },
+        // American English Male Voices
         Model {
             name: "Aura Orion".to_string(),
             voice_id: "aura-orion-en".to_string(),
@@ -404,6 +407,38 @@ pub fn get_available_models() -> Vec<Model> {
             age: "Young Adult".to_string(),
             characteristics: vec!["friendly".to_string(), "warm".to_string()],
             use_cases: vec!["conversational".to_string(), "casual".to_string()],
+        },
+        // Aura 2.0 Premium Voices (newer models)
+        Model {
+            name: "Aura 2 Helios".to_string(),
+            voice_id: "aura-2-helios-en".to_string(),
+            language: "en".to_string(),
+            accent: "American".to_string(),
+            gender: "Male".to_string(),
+            age: "Adult".to_string(),
+            characteristics: vec!["premium".to_string(), "expressive".to_string()],
+            use_cases: vec!["professional".to_string(), "media".to_string()],
+        },
+        Model {
+            name: "Aura 2 Aurora".to_string(),
+            voice_id: "aura-2-aurora-en".to_string(),
+            language: "en".to_string(),
+            accent: "American".to_string(),
+            gender: "Female".to_string(),
+            age: "Adult".to_string(),
+            characteristics: vec!["premium".to_string(), "natural".to_string()],
+            use_cases: vec!["professional".to_string(), "assistant".to_string()],
+        },
+        // Australian English
+        Model {
+            name: "Aura Zeus".to_string(),
+            voice_id: "aura-zeus-en".to_string(),
+            language: "en".to_string(),
+            accent: "Australian".to_string(),
+            gender: "Male".to_string(),
+            age: "Adult".to_string(),
+            characteristics: vec!["friendly".to_string(), "casual".to_string()],
+            use_cases: vec!["conversational".to_string(), "regional".to_string()],
         },
     ]
 }

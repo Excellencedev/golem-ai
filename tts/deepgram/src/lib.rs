@@ -53,8 +53,71 @@ impl VoicesGuest for DeepgramComponent {
 
     fn search_voices(
         query: String,
-        _filter: Option<VoiceFilter>,
+        filter: Option<VoiceFilter>,
     ) -> Result<Vec<VoiceInfo>, TtsError> {
+        debug!("Deepgram: Searching voices: {}", query);
+        let models = get_available_models();
+        let query_lower = query.to_lowercase();
+
+        Ok(models
+            .into_iter()
+            .filter(|m| {
+                // Search in name, voice_id, characteristics, or use_cases
+                m.name.to_lowercase().contains(&query_lower)
+                    || m.voice_id.to_lowercase().contains(&query_lower)
+                    || m.characteristics
+                        .iter()
+                        .any(|c| c.to_lowercase().contains(&query_lower))
+                    || m.use_cases
+                        .iter()
+                        .any(|u| u.to_lowercase().contains(&query_lower))
+                    || m.accent.to_lowercase().contains(&query_lower)
+            })
+            .filter(|m| {
+                // Apply optional filters
+                if let Some(ref f) = filter {
+                    if let Some(ref lang) = f.language {
+                        if !m.language.starts_with(lang) {
+                            return false;
+                        }
+                    }
+                    if let Some(gender) = f.gender {
+                        let model_gender = parse_gender(&m.gender);
+                        if model_gender != gender {
+                            return false;
+                        }
+                    }
+                }
+                true
+            })
+            .map(deepgram_model_to_voice_info)
+            .collect())
+    }
+
+    fn list_languages() -> Result<Vec<LanguageInfo>, TtsError> {
+        Ok(vec![LanguageInfo {
+            code: "en".to_string(),
+            name: "English".to_string(),
+            native_name: "English".to_string(),
+            voice_count: 12,
+        }])
+    }
+}
+
+impl SynthesisGuest for DeepgramComponent {
+    fn synthesize(
+        input: TextInput,
+        options: SynthesisOptions,
+    ) -> Result<SynthesisResult, TtsError> {
+        info!("Deepgram: Synthesizing {} chars", input.content.len());
+
+        if input.content.is_empty() {
+            return Err(invalid_text("Text cannot be empty"));
+        }
+
+        let client = Self::create_client()?;
+        let (request, params) =
+            synthesis_options_to_tts_request(input.content.clone(), Some(options))?;
         let response = client.text_to_speech_with_metadata(&request, params.as_ref())?;
 
         // Convert to SynthesisResult with metadata
